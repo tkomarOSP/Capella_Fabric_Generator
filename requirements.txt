@@ -1,0 +1,2 @@
+flask>=3.0
+capellambse>=0.6

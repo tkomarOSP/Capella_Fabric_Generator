@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git config:*)",
+      "Bash(ls -la /c/apps/.metadata/Capella_Tools/capella_tools/*.py)",
+      "Read(//c/apps/Git_VSCode/Capella_Fabric_Generator/**)"
+    ]
+  }
+}

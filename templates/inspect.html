@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="card shadow-sm border-0">
+  <div class="card-header bg-primary text-white py-3">
+    <h5 class="mb-0">
+      <span class="step-badge">2</span>Inspect Objects
+    </h5>
+  </div>
+  <div class="card-body p-4">
+
+    <p class="text-muted mb-3">
+      Archive: <strong>{{ archive_name }}</strong>
+    </p>
+
+    <!-- Summary badges -->
+    <div class="mb-3">
+      <span class="badge bg-success fs-6 me-2">{{ resolved | length }} found</span>
+      {% if not_found %}
+        <span class="badge bg-danger fs-6">{{ not_found | length }} not found</span>
+      {% endif %}
+    </div>
+
+    <!-- Found objects table -->
+    {% if resolved %}
+    <h6 class="fw-semibold mb-2">Objects Found</h6>
+    <div class="table-responsive mb-4">
+      <table class="table table-sm table-bordered table-hover align-middle">
+        <thead class="table-dark">
+          <tr>
+            <th>UUID</th>
+            <th>Name</th>
+            <th>Type</th>
+            <th>Layer</th>
+            <th>Parent</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for obj in resolved %}
+          <tr>
+            <td class="font-monospace small text-nowrap">{{ obj.uuid }}</td>
+            <td>{{ obj.name }}</td>
+            <td><span class="badge bg-secondary">{{ obj.type }}</span></td>
+            <td>
+              {% if obj.layer == 'OA' %}<span class="badge bg-warning text-dark">OA</span>
+              {% elif obj.layer == 'SA' %}<span class="badge bg-info text-dark">SA</span>
+              {% elif obj.layer == 'LA' %}<span class="badge bg-primary">LA</span>
+              {% elif obj.layer == 'PA' %}<span class="badge bg-success">PA</span>
+              {% else %}<span class="text-muted">—</span>
+              {% endif %}
+            </td>
+            <td class="text-muted small">{{ obj.parent }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+
+    <!-- Not-found list -->
+    {% if not_found %}
+    <div class="alert alert-warning">
+      <strong>UUIDs not found in model:</strong>
+      <ul class="mb-0 mt-2">
+        {% for u in not_found %}
+          <li class="font-monospace small">{{ u }}</li>
+        {% endfor %}
+      </ul>
+      {% if resolved %}
+        <p class="mt-2 mb-0 small text-muted">
+          Generation will proceed using the {{ resolved | length }} resolved object(s) only.
+        </p>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    <!-- Actions -->
+    <form method="POST" action="/generate" class="d-inline">
+      <input type="hidden" name="session_id" value="{{ session_id }}">
+      <a href="/" class="btn btn-outline-secondary me-2">&#8592; Back</a>
+      {% if resolved %}
+        <button type="submit" class="btn btn-success px-4">Generate Fabric</button>
+      {% endif %}
+    </form>
+
+  </div>
+</div>
+
+{% endblock %}
