@@ -179,7 +179,7 @@ def generate_fabric(session: dict) -> tuple[Path, int]:
     Re-open the model and generate a YAML fabric for the resolved UUIDs.
 
     Returns:
-        yaml_path    — Path to the written .yaml file
+        yaml_path    — Path to the written .txt file
         object_count — approximate count of primary objects in the output
     """
     aird_path = Path(session['aird_path'])
@@ -197,7 +197,7 @@ def generate_fabric(session: dict) -> tuple[Path, int]:
     for u in uuid_list:
         try:
             obj = model.by_uuid(u)
-            handler.primary_objects.append(obj)
+            handler.primary_objects.append(obj)  
             handler.generate_yaml(obj)
         except Exception:
             pass
@@ -209,7 +209,7 @@ def generate_fabric(session: dict) -> tuple[Path, int]:
     object_count = yaml_content.count('primary_uuid:')
 
     archive_stem = Path(session.get('archive_name', 'model')).stem
-    yaml_name = f'{archive_stem}_fabric.yaml'
+    yaml_name = f'{archive_stem}_fabric.txt'
     yaml_path = _session_dir(session_id) / yaml_name
 
     with open(yaml_path, 'w', encoding='utf-8') as f:
