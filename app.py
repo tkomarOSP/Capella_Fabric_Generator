@@ -1,6 +1,7 @@
 # Capella Fabric Generator — Flask application
 # Routes: / → /inspect → /generate → /download/<session_id>
 
+import os
 from pathlib import Path
 from flask import (
     Flask, render_template, request, redirect, url_for, send_file, flash
@@ -8,7 +9,7 @@ from flask import (
 import capella_service as svc
 
 app = Flask(__name__)
-app.secret_key = 'capella-fabric-generator-dev-secret'
+app.secret_key = os.environ.get('SECRET_KEY', 'capella-fabric-generator-dev-secret')
 
 
 # ---------------------------------------------------------------------------
@@ -157,4 +158,4 @@ def start_over():
 # ---------------------------------------------------------------------------
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run()

@@ -1,0 +1,19 @@
+[Unit]
+Description=Capella Fabric Generator
+After=network.target
+
+[Service]
+User=www-data
+WorkingDirectory=/opt/capella_fabric_generator
+EnvironmentFile=/opt/capella_fabric_generator/.env
+ExecStart=/opt/capella_fabric_generator/.venv/bin/gunicorn \
+          --workers 2 \
+          --bind 127.0.0.1:8000 \
+          --access-logfile /var/log/capella-fabric/access.log \
+          --error-logfile /var/log/capella-fabric/error.log \
+          wsgi:app
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

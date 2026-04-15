@@ -1,6 +1,7 @@
 # Copyright — Capella Fabric Generator
 # Service layer: model loading, UUID resolution, YAML fabric generation.
 
+import os
 import sys
 import re
 import uuid
@@ -13,7 +14,7 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 # Ensure Capella_Tools is importable
 # ---------------------------------------------------------------------------
-_CAPELLA_TOOLS = Path(r'C:\apps\.metadata\Capella_Tools')
+_CAPELLA_TOOLS = Path(os.environ.get('CAPELLA_TOOLS_PATH', r'C:\apps\.metadata\Capella_Tools'))
 if str(_CAPELLA_TOOLS) not in sys.path:
     sys.path.insert(0, str(_CAPELLA_TOOLS))
 
