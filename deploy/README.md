@@ -20,7 +20,7 @@ apt install -y python3.11 python3.11-venv python3-pip nginx git
 ## 2. Clone the repository
 
 ```bash
-git clone <your-repo-url> /opt/capella_fabric_generator
+git clone https://github.com/tkomarOSP/Capella_Fabric_Generator /opt/capella_fabric_generator
 cd /opt/capella_fabric_generator
 ```
 
@@ -28,11 +28,10 @@ cd /opt/capella_fabric_generator
 
 ## 3. Install Capella_Tools
 
-Copy the `Capella_Tools` folder to the droplet (from your local machine):
+Clone directly from GitHub:
 
 ```bash
-# Run this from your local machine
-scp -r "C:\apps\.metadata\Capella_Tools" root@<droplet-ip>:/opt/capella_tools
+git clone https://github.com/tkSDISW/Capella_Tools /opt/capella_tools
 ```
 
 ---
