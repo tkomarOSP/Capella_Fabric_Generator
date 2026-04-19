@@ -31,7 +31,7 @@ cd /opt/capella_fabric_generator
 Clone directly from GitHub:
 
 ```bash
-git clone https://github.com/tkSDISW/Capella_Tools /opt/capella_tools
+git clone -b feature/capella-7.0.1-support https://github.com/tkSDISW/Capella_Tools /opt/capella_tools
 ```
 
 ---
