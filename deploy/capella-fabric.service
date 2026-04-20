@@ -9,6 +9,7 @@ EnvironmentFile=/opt/capella_fabric_generator/.env
 ExecStart=/opt/capella_fabric_generator/.venv/bin/gunicorn \
           --workers 2 \
           --bind 127.0.0.1:8000 \
+          --worker-tmp-dir /tmp \
           --access-logfile /var/log/capella-fabric/access.log \
           --error-logfile /var/log/capella-fabric/error.log \
           wsgi:app

@@ -98,7 +98,7 @@ nginx -t                                  # verify config
 systemctl reload nginx
 ```
 
-The app will now be reachable at `http://138.197.91.91/`.
+The app will now be reachable at `http://165.22.188.83/`.
 
 ---
 
