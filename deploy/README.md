@@ -92,7 +92,7 @@ systemctl status capella-fabric   # should show "active (running)"
 
 ```bash
 cp deploy/nginx.conf /etc/nginx/sites-available/capella-fabric
-ln -s /etc/nginx/sites-available/capella-fabric /etc/nginx/sites-enabled/
+ln -sf /etc/nginx/sites-available/capella-fabric /etc/nginx/sites-enabled/
 rm -f /etc/nginx/sites-enabled/default   # remove default placeholder
 nginx -t                                  # verify config
 systemctl reload nginx
@@ -107,6 +107,7 @@ The app will now be reachable at `http://165.22.188.83/`.
 ```bash
 cd /opt/capella_fabric_generator
 git pull
+or if need to discharge changes git reset --hard origin/master && git pull
 .venv/bin/pip install -r requirements.txt   # pick up any new deps
 systemctl restart capella-fabric
 ```
