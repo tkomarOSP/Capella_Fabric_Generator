@@ -13,10 +13,28 @@ app.secret_key = os.environ.get('SECRET_KEY', 'capella-fabric-generator-dev-secr
 
 
 # ---------------------------------------------------------------------------
-# Page 1 — Upload form
+# Splash / Welcome screen
 # ---------------------------------------------------------------------------
 
 @app.route('/', methods=['GET'])
+def welcome():
+    return render_template('welcome.html')
+
+
+# ---------------------------------------------------------------------------
+# Help documentation
+# ---------------------------------------------------------------------------
+
+@app.route('/help', methods=['GET'])
+def help_page():
+    return render_template('help.html')
+
+
+# ---------------------------------------------------------------------------
+# Page 1 — Upload form
+# ---------------------------------------------------------------------------
+
+@app.route('/start', methods=['GET'])
 def index():
     return render_template('upload.html')
 

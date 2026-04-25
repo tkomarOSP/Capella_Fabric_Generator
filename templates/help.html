@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="card border-0 shadow-sm mb-4">
+  <div class="card-header bg-primary text-white py-3">
+    <h1 class="h4 mb-0 fw-semibold">Help Documentation — Capella Fabric Generator</h1>
+  </div>
+
+  <div class="card-body px-4 py-4">
+
+    <!-- Purpose -->
+    <h2 class="h5 fw-semibold mb-2">Purpose</h2>
+    <p>
+      This tool generates a <strong>Fabric</strong> representation from a Capella model that
+      can be consumed by Generative AI tools such as <strong>Microsoft Copilot</strong>,
+      ChatGPT, Gemini, and Grok. By exporting structured model data as a YAML Fabric file,
+      you can ask AI tools questions about your system architecture grounded in the actual
+      model content.
+    </p>
+
+    <hr>
+
+    <!-- Workflow -->
+    <h2 class="h5 fw-semibold mb-3">Workflow Overview</h2>
+    <ol class="mb-4">
+      <li class="mb-2">
+        <strong>Open and review your Capella model.</strong>
+        Identify the model elements (components, functions, interfaces, etc.) that you want
+        to include in the Fabric.
+      </li>
+      <li class="mb-2">
+        <strong>Identify the UUIDs</strong> of those model elements.
+        Each element in Capella has a stable UUID — this is what the tool uses to locate and
+        export the element. See the UUID section below for how to find them.
+      </li>
+      <li class="mb-2">
+        <strong>Export the Capella project as a <code>.zip</code> archive.</strong>
+        In Capella, right-click the project → <em>Export</em> → <em>Archive File</em>.
+        Save the full project archive — do not use partial exports.
+      </li>
+      <li class="mb-2">
+        <strong>Upload the archive and UUIDs to this tool.</strong>
+        The tool will resolve the UUIDs against the model, then generate a structured
+        YAML Fabric file you can download and use with your AI tool of choice.
+      </li>
+    </ol>
+
+    <hr>
+
+    <!-- What is a UUID -->
+    <h2 class="h5 fw-semibold mb-2">What is a UUID?</h2>
+    <p>
+      Every model element in Capella is assigned a <strong>UUID (Universally Unique Identifier)</strong>.
+      This is the stable identifier the Fabric Generator uses to locate model elements regardless
+      of their display name or position in the model tree. UUIDs remain consistent even if an
+      element is renamed, making them the reliable key for traceability between Capella and
+      Fabric artifacts.
+    </p>
+    <p>
+      The UUID looks like: <code class="font-monospace">a1b2c3d4-e5f6-7890-abcd-ef1234567890</code>
+    </p>
+
+    <hr>
+
+    <!-- Finding UUIDs -->
+    <h2 class="h5 fw-semibold mb-3">Finding UUIDs in Capella</h2>
+
+    <h3 class="h6 fw-semibold mb-1">Step 3a: Finding UUIDs for a Diagram</h3>
+    <p class="small text-muted mb-2">
+      UUIDs can be identified directly from a diagram using Capella's
+      <strong>Mass Property Visualization</strong> feature.
+    </p>
+    <ol class="mb-2">
+      <li>Navigate to the diagram that contains the element of interest.</li>
+      <li>Right-click the diagram and use the context menu to <em>Show Diagram in Project Explorer</em>.</li>
+      <li>From the diagram object in the Project Explorer, use the context menu to invoke <em>Send to Mass Visualization View</em>.</li>
+      <li>In the visualization settings, ensure that <strong>Expert mode</strong> is enabled.
+        Expert mode exposes additional technical metadata, including UUIDs.</li>
+      <li>The UUID will be displayed as part of the element's visualized properties.</li>
+      <li>Select the UUID value and copy it with <kbd>Ctrl+C</kbd>.</li>
+    </ol>
+    <div class="alert alert-info py-2 small mb-3">
+      <strong>Note:</strong> If UUIDs are not visible, confirm that
+      <em>Mass Property Visualization</em> is active and <em>Expert mode</em> is enabled
+      in the visualization settings.
+    </div>
+
+    <h3 class="h6 fw-semibold mb-1">Step 3b: Finding UUIDs on a Model Element</h3>
+    <p class="small text-muted mb-2">
+      UUIDs can also be identified directly on a model element using Capella's
+      object level visualization features.
+    </p>
+    <ol class="mb-2">
+      <li>In the Project Explorer, navigate to the model element of interest (for example, a Functional Chain Function, Component, or Actor).</li>
+      <li>Select the model element.</li>
+      <li>Open <strong>Mass Property Visualization</strong> from the context menu or toolbar.</li>
+      <li>In the visualization settings, ensure that <strong>Expert mode</strong> is enabled.
+        Expert mode exposes technical metadata that is not shown in standard views.</li>
+      <li>Review the visualized properties associated with the selected model element.</li>
+      <li>Locate the <strong>UUID</strong> in the displayed properties.</li>
+      <li>Select the UUID value and copy it with <kbd>Ctrl+C</kbd>.</li>
+    </ol>
+    <p class="small mb-2">
+      This approach allows you to extract UUIDs directly from the semantic model element,
+      independent of any diagram representation.
+    </p>
+    <div class="alert alert-info py-2 small mb-3">
+      <strong>Note:</strong> If the UUID is not visible:
+      <ul class="mb-0 mt-1">
+        <li>Confirm that <em>Mass Property Visualization</em> is active</li>
+        <li>Ensure <em>Expert mode</em> is enabled</li>
+        <li>Verify that the selected item is the semantic element (not a diagram decoration)</li>
+      </ul>
+    </div>
+
+
+    <hr>
+
+    <!-- Options -->
+    <h2 class="h5 fw-semibold mb-2">Generation Options</h2>
+    <p class="mb-1">When generating a Fabric you can optionally include:</p>
+    <ul>
+      <li>
+        <strong>Include Realized Elements</strong> — pulls in elements from lower layers that
+        are realized by the selected objects (e.g., Logical → Physical).
+      </li>
+      <li>
+        <strong>Include Realizing Elements</strong> — pulls in elements from higher layers that
+        realize the selected objects (e.g., Physical → Logical).
+      </li>
+    </ul>
+
+  </div>
+</div>
+
+<div class="text-center mb-4">
+  <p class="text-muted mb-3">Ready to begin?</p>
+  <a href="{{ url_for('index') }}" class="btn btn-primary btn-lg px-5">Get Started</a>
+</div>
+
+{% endblock %}

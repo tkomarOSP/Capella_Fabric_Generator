@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="card border-0 shadow-sm">
+  <div class="card-header bg-primary text-white py-4 text-center">
+    <h1 class="h2 mb-1 fw-semibold">Welcome to the Capella Fabric Generator</h1>
+    <p class="mb-0 opacity-75">Brought to you by the <strong>InnovatingwithCapella</strong> YouTube channel</p>
+  </div>
+
+  <div class="card-body px-4 py-4 text-center">
+
+    <p class="lead mb-3">
+      This tool was developed to allow Capella users to explore using a
+      <strong>Fabric</strong> exported from their model as a source for
+      Generative AI tools such as Microsoft Copilot, ChatGPT, Gemini, and Grok.
+    </p>
+
+    <p class="text-muted mb-4">
+      Upload a Capella project archive and provide the UUIDs of the model elements
+      you want to include. The tool will resolve those elements and generate a
+      structured YAML Fabric file ready for use with your AI tools of choice.
+    </p>
+
+    <div class="d-flex justify-content-center gap-3 flex-wrap mb-4">
+      <a href="{{ url_for('index') }}" class="btn btn-primary btn-lg px-5">
+        Get Started
+      </a>
+      <a href="{{ url_for('help_page') }}" class="btn btn-outline-secondary btn-lg px-5">
+        View Help Documentation
+      </a>
+    </div>
+
+    <hr class="my-3">
+
+    <p class="text-muted small mb-0">
+      Learn more at
+      <a href="http://www.innovatingwithcapella.com" target="_blank" rel="noopener">
+        www.innovatingwithcapella.com
+      </a>
+    </p>
+
+  </div>
+</div>
+
+{% endblock %}
