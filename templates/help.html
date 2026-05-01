@@ -22,28 +22,89 @@
 
     <!-- Workflow -->
     <h2 class="h5 fw-semibold mb-3">Workflow Overview</h2>
-    <ol class="mb-4">
-      <li class="mb-2">
-        <strong>Open and review your Capella model.</strong>
-        Identify the model elements (components, functions, interfaces, etc.) that you want
-        to include in the Fabric.
+    <p class="mb-2">There are two ways to select the model elements to include in the Fabric:</p>
+
+    <div class="row g-3 mb-4">
+      <div class="col-md-6">
+        <div class="card h-100 border-primary border-opacity-25">
+          <div class="card-header fw-semibold bg-primary bg-opacity-10 py-2">
+            Option A — By UUID
+          </div>
+          <div class="card-body small">
+            <ol class="ps-3 mb-0">
+              <li class="mb-1">Open your Capella model and identify the elements to export.</li>
+              <li class="mb-1">Copy the UUID(s) for those elements (see the UUID section below).</li>
+              <li class="mb-1">Export the project as a <code>.zip</code> archive.</li>
+              <li>Upload the archive and paste the UUIDs into the <strong>By UUID</strong> tab, then click <strong>Inspect UUIDs</strong>.</li>
+            </ol>
+          </div>
+        </div>
+      </div>
+      <div class="col-md-6">
+        <div class="card h-100 border-success border-opacity-25">
+          <div class="card-header fw-semibold bg-success bg-opacity-10 py-2">
+            Option B — Browse by Name
+          </div>
+          <div class="card-body small">
+            <ol class="ps-3 mb-0">
+              <li class="mb-1">Export the project as a <code>.zip</code> archive.</li>
+              <li class="mb-1">Upload the archive on the <strong>Browse by Name</strong> tab and click <strong>Browse Model</strong>.</li>
+              <li class="mb-1">Select a <strong>Phase</strong>, an <strong>Object Type</strong>, and optionally enter a name to filter.</li>
+              <li>Check the elements you want and click <strong>Add Selected &amp; Inspect</strong>.</li>
+            </ol>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <p>
+      Both options lead to the same <strong>Inspect</strong> confirmation step, where you can
+      review the selected objects before clicking <strong>Generate Fabric</strong>.
+    </p>
+
+    <p>
+      <strong>Exporting the archive:</strong> In Capella, right-click the project →
+      <em>Export</em> → <em>Archive File</em>. Save the full project archive — do not use
+      partial exports.
+    </p>
+
+    <hr>
+
+    <!-- Browse by Name -->
+    <h2 class="h5 fw-semibold mb-2">Browse by Name</h2>
+    <p>
+      The Browse by Name option lets you search the model without needing to look up UUIDs in
+      advance. After uploading the archive you are taken to the Browse page, which has three
+      filters:
+    </p>
+    <ul class="mb-3">
+      <li>
+        <strong>Phase</strong> — the Capella architectural layer to search:
+        <span class="badge bg-warning text-dark">OA</span> Operational Analysis,
+        <span class="badge bg-info text-dark">SA</span> System Analysis,
+        <span class="badge bg-primary">LA</span> Logical Architecture, or
+        <span class="badge bg-success">PA</span> Physical Architecture.
       </li>
-      <li class="mb-2">
-        <strong>Identify the UUIDs</strong> of those model elements.
-        Each element in Capella has a stable UUID — this is what the tool uses to locate and
-        export the element. See the UUID section below for how to find them.
+      <li>
+        <strong>Object Type</strong> — the kind of model element to list (e.g., Component,
+        Function, Capability, Diagram). The available types update automatically when you
+        change the Phase.
       </li>
-      <li class="mb-2">
-        <strong>Export the Capella project as a <code>.zip</code> archive.</strong>
-        In Capella, right-click the project → <em>Export</em> → <em>Archive File</em>.
-        Save the full project archive — do not use partial exports.
+      <li>
+        <strong>Name contains</strong> — optional free-text filter. Leave blank to list all
+        elements of the selected type. Matching is case-insensitive.
       </li>
-      <li class="mb-2">
-        <strong>Upload the archive and UUIDs to this tool.</strong>
-        The tool will resolve the UUIDs against the model, then generate a structured
-        YAML Fabric file you can download and use with your AI tool of choice.
-      </li>
-    </ol>
+    </ul>
+    <p>
+      Click <strong>Search</strong> to run the query. The results table shows the name, type,
+      layer, parent, and UUID of each match. Check one or more rows — or use the header
+      checkbox to select all — then click <strong>Add Selected &amp; Inspect</strong> to
+      proceed.
+    </p>
+    <div class="alert alert-info py-2 small mb-3">
+      <strong>Tip:</strong> If a name is common (e.g. "Function 1"), use a more specific
+      substring or browse a narrower Object Type to reduce the result set before selecting.
+    </div>
 
     <hr>
 
