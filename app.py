@@ -40,6 +40,143 @@ def index():
 
 
 # ---------------------------------------------------------------------------
+# Alternative Page 1b — Upload archive for name-based browsing
+# ---------------------------------------------------------------------------
+
+@app.route('/upload-browse', methods=['POST'])
+def upload_browse():
+    file = request.files.get('archive')
+    if not file or file.filename == '':
+        flash('Please select a Capella archive (.zip) to upload.')
+        return redirect(url_for('index'))
+
+    if not file.filename.lower().endswith('.zip'):
+        flash('Only .zip archives are accepted.')
+        return redirect(url_for('index'))
+
+    include_realized = 'include_realized' in request.form
+    include_realizing = 'include_realizing' in request.form
+
+    session_id = svc.create_session()
+    try:
+        svc.save_upload(file, session_id)
+        svc.unpack_archive(session_id)
+
+        aird_path = svc.find_aird_file(session_id)
+        if aird_path is None:
+            flash('No .aird file found inside the archive.')
+            svc.cleanup_session(session_id)
+            return redirect(url_for('index'))
+
+        session_data = {
+            'session_id': session_id,
+            'archive_name': file.filename,
+            'aird_path': str(aird_path),
+            'uuid_list': [],
+            'resolved_uuids': [],
+            'not_found': [],
+            'include_realized': include_realized,
+            'include_realizing': include_realizing,
+            'yaml_path': None,
+        }
+        svc.save_session(session_id, session_data)
+        return redirect(url_for('browse', session_id=session_id))
+
+    except Exception as exc:
+        svc.cleanup_session(session_id)
+        flash(f'Error processing archive: {exc}')
+        return redirect(url_for('index'))
+
+
+# ---------------------------------------------------------------------------
+# Alternative Page 2b — Browse model by phase / type / name
+# ---------------------------------------------------------------------------
+
+@app.route('/browse/<session_id>', methods=['GET'])
+def browse(session_id):
+    try:
+        session = svc.load_session(session_id)
+    except Exception:
+        flash('Session not found — please start over.')
+        return redirect(url_for('index'))
+
+    return render_template(
+        'browse.html',
+        session_id=session_id,
+        archive_name=session['archive_name'],
+        phase_types=svc.get_phase_types(),
+        selected_phase='',
+        selected_type='',
+        name_query='',
+        results=None,
+    )
+
+
+@app.route('/search-objects', methods=['POST'])
+def search_objects():
+    session_id = request.form.get('session_id', '').strip()
+    phase = request.form.get('phase', '').strip()
+    obj_type = request.form.get('obj_type', '').strip()
+    name_query = request.form.get('name_query', '').strip()
+    archive_name = ''
+    results = []
+
+    try:
+        session = svc.load_session(session_id)
+        archive_name = session.get('archive_name', '')
+        model = svc.open_model(Path(session['aird_path']))
+        results = svc.search_by_name(model, phase, obj_type, name_query)
+    except Exception as exc:
+        flash(f'Search error: {exc}')
+
+    return render_template(
+        'browse.html',
+        session_id=session_id,
+        archive_name=archive_name,
+        phase_types=svc.get_phase_types(),
+        selected_phase=phase,
+        selected_type=obj_type,
+        name_query=name_query,
+        results=results,
+    )
+
+
+@app.route('/add-objects', methods=['POST'])
+def add_objects():
+    session_id = request.form.get('session_id', '').strip()
+    selected_uuids = request.form.getlist('selected_uuids')
+
+    if not session_id:
+        flash('Missing session — please start over.')
+        return redirect(url_for('index'))
+
+    if not selected_uuids:
+        flash('No objects selected.')
+        return redirect(url_for('browse', session_id=session_id))
+
+    try:
+        session = svc.load_session(session_id)
+        model = svc.open_model(Path(session['aird_path']))
+        resolved, not_found = svc.resolve_uuids(model, selected_uuids)
+
+        session['uuid_list'] = selected_uuids
+        session['resolved_uuids'] = [obj['uuid'] for obj in resolved]
+        session['not_found'] = not_found
+        svc.save_session(session_id, session)
+
+        return render_template(
+            'inspect.html',
+            session_id=session_id,
+            archive_name=session['archive_name'],
+            resolved=resolved,
+            not_found=not_found,
+        )
+    except Exception as exc:
+        flash(f'Error resolving objects: {exc}')
+        return redirect(url_for('browse', session_id=session_id))
+
+
+# ---------------------------------------------------------------------------
 # Page 2 — Inspect objects
 # ---------------------------------------------------------------------------
 

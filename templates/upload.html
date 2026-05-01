@@ -4,52 +4,132 @@
 <div class="card shadow-sm border-0">
   <div class="card-header bg-primary text-white py-3">
     <h5 class="mb-0">
-      <span class="step-badge">1</span>Upload Archive &amp; Enter UUIDs
+      <span class="step-badge">1</span>Upload Archive
     </h5>
   </div>
   <div class="card-body p-4">
-    <form method="POST" action="/inspect" enctype="multipart/form-data" novalidate>
 
-      <div class="mb-4">
-        <label for="archive" class="form-label fw-semibold">
-          Capella Archive <span class="text-muted fw-normal">(.zip)</span>
-        </label>
-        <input type="file" id="archive" name="archive"
-               class="form-control" accept=".zip" required>
-        <div class="form-text">Must contain a <code>.aird</code> and matching <code>.capella</code> file.</div>
+    <!-- Mode tabs -->
+    <ul class="nav nav-tabs mb-4" id="uploadTabs" role="tablist">
+      <li class="nav-item" role="presentation">
+        <button class="nav-link active" id="uuid-tab" data-bs-toggle="tab"
+                data-bs-target="#uuid-pane" type="button" role="tab">
+          By UUID
+        </button>
+      </li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" id="browse-tab" data-bs-toggle="tab"
+                data-bs-target="#browse-pane" type="button" role="tab">
+          Browse by Name
+        </button>
+      </li>
+    </ul>
+
+    <div class="tab-content">
+
+      <!-- ── Tab 1: UUID entry (existing flow) ── -->
+      <div class="tab-pane fade show active" id="uuid-pane" role="tabpanel">
+        <form method="POST" action="/inspect" enctype="multipart/form-data" novalidate>
+
+          <div class="mb-4">
+            <label for="archive-uuid" class="form-label fw-semibold">
+              Capella Archive <span class="text-muted fw-normal">(.zip)</span>
+            </label>
+            <input type="file" id="archive-uuid" name="archive"
+                   class="form-control" accept=".zip" required>
+            <div class="form-text">Must contain a <code>.aird</code> and matching <code>.capella</code> file.</div>
+          </div>
+
+          <div class="mb-4">
+            <label for="uuids" class="form-label fw-semibold">UUIDs</label>
+            <textarea id="uuids" name="uuids" class="form-control font-monospace" rows="7"
+                      placeholder="One UUID per line, or comma-separated&#10;e.g. a1b2c3d4-...&#10;     e5f6a7b8-..."></textarea>
+            <div class="form-text">Whitespace, commas, and newlines are all accepted as separators. Duplicates are ignored.</div>
+          </div>
+
+          <div class="mb-4">
+            <p class="form-label fw-semibold mb-2">Options</p>
+            <div class="form-check mb-1">
+              <input class="form-check-input" type="checkbox"
+                     id="include_realized" name="include_realized">
+              <label class="form-check-label" for="include_realized">
+                Include <strong>realized</strong> refs
+              </label>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox"
+                     id="include_realizing" name="include_realizing">
+              <label class="form-check-label" for="include_realizing">
+                Include <strong>realizing</strong> refs
+              </label>
+            </div>
+          </div>
+
+          <button type="submit" class="btn btn-primary px-4">
+            Inspect UUIDs
+          </button>
+
+        </form>
       </div>
 
-      <div class="mb-4">
-        <label for="uuids" class="form-label fw-semibold">UUIDs</label>
-        <textarea id="uuids" name="uuids" class="form-control font-monospace" rows="7"
-                  placeholder="One UUID per line, or comma-separated&#10;e.g. a1b2c3d4-...&#10;     e5f6a7b8-..."></textarea>
-        <div class="form-text">Whitespace, commas, and newlines are all accepted as separators. Duplicates are ignored.</div>
+      <!-- ── Tab 2: Browse by name (new flow) ── -->
+      <div class="tab-pane fade" id="browse-pane" role="tabpanel">
+        <form method="POST" action="/upload-browse" enctype="multipart/form-data" novalidate>
+
+          <div class="mb-4">
+            <label for="archive-browse" class="form-label fw-semibold">
+              Capella Archive <span class="text-muted fw-normal">(.zip)</span>
+            </label>
+            <input type="file" id="archive-browse" name="archive"
+                   class="form-control" accept=".zip" required>
+            <div class="form-text">Must contain a <code>.aird</code> and matching <code>.capella</code> file.</div>
+          </div>
+
+          <div class="mb-4">
+            <p class="form-label fw-semibold mb-2">Options</p>
+            <div class="form-check mb-1">
+              <input class="form-check-input" type="checkbox"
+                     id="browse_include_realized" name="include_realized">
+              <label class="form-check-label" for="browse_include_realized">
+                Include <strong>realized</strong> refs
+              </label>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox"
+                     id="browse_include_realizing" name="include_realizing">
+              <label class="form-check-label" for="browse_include_realizing">
+                Include <strong>realizing</strong> refs
+              </label>
+            </div>
+          </div>
+
+          <button type="submit" class="btn btn-primary px-4">
+            Browse Model
+          </button>
+
+        </form>
       </div>
 
-      <div class="mb-4">
-        <p class="form-label fw-semibold mb-2">Options</p>
-        <div class="form-check mb-1">
-          <input class="form-check-input" type="checkbox"
-                 id="include_realized" name="include_realized">
-          <label class="form-check-label" for="include_realized">
-            Include <strong>realized</strong> refs
-          </label>
-        </div>
-        <div class="form-check">
-          <input class="form-check-input" type="checkbox"
-                 id="include_realizing" name="include_realizing">
-          <label class="form-check-label" for="include_realizing">
-            Include <strong>realizing</strong> refs
-          </label>
-        </div>
-      </div>
-
-      <button type="submit" class="btn btn-primary px-4">
-        Inspect UUIDs
-      </button>
-
-    </form>
+    </div><!-- /.tab-content -->
   </div>
 </div>
+
+<script>
+/* Vanilla fallback in case Bootstrap JS CDN is unavailable. */
+document.querySelectorAll('[data-bs-toggle="tab"]').forEach(function (btn) {
+  btn.addEventListener('click', function (e) {
+    e.preventDefault();
+    document.querySelectorAll('[data-bs-toggle="tab"]').forEach(function (b) {
+      b.classList.remove('active');
+    });
+    document.querySelectorAll('.tab-pane').forEach(function (p) {
+      p.classList.remove('show', 'active');
+    });
+    btn.classList.add('active');
+    var target = document.querySelector(btn.getAttribute('data-bs-target'));
+    if (target) { target.classList.add('show', 'active'); }
+  });
+});
+</script>
 
 {% endblock %}

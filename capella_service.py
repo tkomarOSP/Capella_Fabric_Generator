@@ -100,6 +100,75 @@ def open_model(aird_path: Path) -> capellambse.MelodyModel:
 
 
 # ---------------------------------------------------------------------------
+# Phase → object-type collections
+# ---------------------------------------------------------------------------
+
+PHASE_COLLECTIONS: dict[str, dict[str, object]] = {
+    "OA": {
+        "Requirement":      lambda m: m.oa.all_requirements,
+        "Entity":           lambda m: m.oa.all_entities,
+        "Activity":         lambda m: m.oa.all_activities,
+        "Capability":       lambda m: m.oa.all_capabilities,
+        "Entity Exchange":  lambda m: m.oa.all_entity_exchanges,
+        "Process":          lambda m: m.oa.all_processes,
+        "Diagram":          lambda m: m.oa.diagrams,
+    },
+    "SA": {
+        "Requirement":       lambda m: m.oa.all_requirements,
+        "Component":         lambda m: m.sa.all_components,
+        "Capability":        lambda m: m.sa.all_capabilities,
+        "Function Exchange": lambda m: m.sa.all_function_exchanges,
+        "Function":          lambda m: m.sa.all_functions,
+        "Mission":           lambda m: m.sa.all_missions,
+        "Functional Chain":  lambda m: m.sa.all_functional_chains,
+        "Diagram":           lambda m: m.sa.diagrams,
+    },
+    "LA": {
+        "Requirement":        lambda m: m.oa.all_requirements,
+        "Capability":         lambda m: m.la.all_capabilities,
+        "Component":          lambda m: m.la.all_components,
+        "Function":           lambda m: m.la.all_functions,
+        "Function Exchange":  lambda m: m.la.all_function_exchanges,
+        "Functional Chain":   lambda m: m.la.all_functional_chains,
+        "Interface":          lambda m: m.la.all_interfaces,
+        "Component Exchange": lambda m: list(m.la.component_exchanges) + list(m.la.actor_exchanges),
+        "Diagram":            lambda m: m.la.diagrams,
+    },
+    "PA": {
+        "Requirement":        lambda m: m.oa.all_requirements,
+        "Component":          lambda m: m.pa.all_components,
+        "Function":           lambda m: m.pa.all_functions,
+        "Functional Chain":   lambda m: m.pa.all_functional_chains,
+        "Function Exchange":  lambda m: m.pa.all_function_exchanges,
+        "Capability":         lambda m: m.pa.all_capabilities,
+        "Component Exchange": lambda m: m.pa.all_component_exchanges,
+        "Physical Exchange":  lambda m: m.pa.all_physical_exchanges,
+        "Physical Link":      lambda m: m.pa.all_physical_links,
+        "Physical Path":      lambda m: m.pa.all_physical_paths,
+        "Diagram":            lambda m: m.pa.diagrams,
+    },
+}
+
+
+def get_phase_types() -> dict[str, list[str]]:
+    """Return {phase: [type_label, ...]} for populating the browse UI."""
+    return {phase: list(types.keys()) for phase, types in PHASE_COLLECTIONS.items()}
+
+
+def search_by_name(model, phase: str, obj_type: str, name_query: str) -> list[dict]:
+    """Return _object_info dicts from a phase+type collection matching name_query (case-insensitive substring)."""
+    getter = PHASE_COLLECTIONS.get(phase, {}).get(obj_type)
+    if getter is None:
+        return []
+    q = name_query.strip().lower()
+    return [
+        _object_info(obj)
+        for obj in getter(model)
+        if not q or q in (getattr(obj, 'name', '') or '').lower()
+    ]
+
+
+# ---------------------------------------------------------------------------
 # UUID parsing
 # ---------------------------------------------------------------------------
 

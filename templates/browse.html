@@ -1,0 +1,170 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="card shadow-sm border-0">
+  <div class="card-header bg-primary text-white py-3">
+    <h5 class="mb-0">
+      <span class="step-badge">2</span>Browse Model Objects
+    </h5>
+  </div>
+  <div class="card-body p-4">
+
+    <p class="text-muted mb-4">
+      Archive: <strong>{{ archive_name }}</strong>
+    </p>
+
+    <!-- Search form -->
+    <form method="POST" action="/search-objects">
+      <input type="hidden" name="session_id" value="{{ session_id }}">
+      <div class="row g-3 align-items-end mb-4">
+
+        <div class="col-md-3">
+          <label class="form-label fw-semibold">Phase</label>
+          <select class="form-select" name="phase" id="phase-select" required>
+            <option value="">Select phase…</option>
+            {% for ph in phase_types.keys() %}
+            <option value="{{ ph }}" {% if selected_phase == ph %}selected{% endif %}>{{ ph }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="col-md-3">
+          <label class="form-label fw-semibold">Object Type</label>
+          <select class="form-select" name="obj_type" id="type-select" required>
+            <option value="">Select type…</option>
+            {% if selected_phase and selected_phase in phase_types %}
+              {% for t in phase_types[selected_phase] %}
+              <option value="{{ t }}" {% if selected_type == t %}selected{% endif %}>{{ t }}</option>
+              {% endfor %}
+            {% endif %}
+          </select>
+        </div>
+
+        <div class="col-md-4">
+          <label class="form-label fw-semibold">Name contains</label>
+          <input type="text" class="form-control" name="name_query"
+                 value="{{ name_query or '' }}"
+                 placeholder="leave blank to list all">
+        </div>
+
+        <div class="col-md-2">
+          <button type="submit" class="btn btn-primary w-100">Search</button>
+        </div>
+
+      </div>
+    </form>
+
+    <!-- Results -->
+    {% if results is not none %}
+      {% if results %}
+
+        <form method="POST" action="/add-objects" id="add-form">
+          <input type="hidden" name="session_id" value="{{ session_id }}">
+
+          <div class="d-flex align-items-center justify-content-between mb-2">
+            <h6 class="fw-semibold mb-0">{{ results | length }} result(s)</h6>
+            <div>
+              <a href="/browse/{{ session_id }}" class="btn btn-sm btn-outline-secondary me-2">Clear</a>
+              <button type="submit" class="btn btn-sm btn-success px-3" id="add-btn" disabled>
+                Add Selected &amp; Inspect
+              </button>
+            </div>
+          </div>
+
+          <div class="table-responsive">
+            <table class="table table-sm table-bordered table-hover align-middle">
+              <thead class="table-dark">
+                <tr>
+                  <th style="width:2rem">
+                    <input type="checkbox" id="select-all" title="Select all">
+                  </th>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Layer</th>
+                  <th>Parent</th>
+                  <th class="font-monospace small">UUID</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for obj in results %}
+                <tr>
+                  <td>
+                    <input type="checkbox" name="selected_uuids"
+                           value="{{ obj.uuid }}" class="row-check">
+                  </td>
+                  <td>{{ obj.name }}</td>
+                  <td><span class="badge bg-secondary">{{ obj.type }}</span></td>
+                  <td>
+                    {% if obj.layer == 'OA' %}<span class="badge bg-warning text-dark">OA</span>
+                    {% elif obj.layer == 'SA' %}<span class="badge bg-info text-dark">SA</span>
+                    {% elif obj.layer == 'LA' %}<span class="badge bg-primary">LA</span>
+                    {% elif obj.layer == 'PA' %}<span class="badge bg-success">PA</span>
+                    {% else %}<span class="text-muted">—</span>
+                    {% endif %}
+                  </td>
+                  <td class="text-muted small">{{ obj.parent }}</td>
+                  <td class="font-monospace small text-nowrap">{{ obj.uuid }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+
+          <div class="mt-2 text-end">
+            <button type="submit" class="btn btn-success px-4" id="add-btn-bottom" disabled>
+              Add Selected &amp; Inspect
+            </button>
+          </div>
+
+        </form>
+
+      {% else %}
+        <div class="alert alert-info mb-0">No objects matched your search.</div>
+      {% endif %}
+    {% endif %}
+
+    <hr class="mt-4">
+    <a href="/" class="btn btn-outline-secondary btn-sm">&#8592; Start Over</a>
+
+  </div>
+</div>
+
+<script>
+const phaseTypes = {{ phase_types | tojson }};
+
+document.getElementById('phase-select').addEventListener('change', function () {
+  const typeSelect = document.getElementById('type-select');
+  const types = phaseTypes[this.value] || [];
+  typeSelect.innerHTML = '<option value="">Select type…</option>';
+  types.forEach(function (t) {
+    const opt = document.createElement('option');
+    opt.value = t;
+    opt.textContent = t;
+    typeSelect.appendChild(opt);
+  });
+});
+
+function syncAddButtons() {
+  const any = document.querySelectorAll('.row-check:checked').length > 0;
+  ['add-btn', 'add-btn-bottom'].forEach(function (id) {
+    const btn = document.getElementById(id);
+    if (btn) btn.disabled = !any;
+  });
+}
+
+const selectAll = document.getElementById('select-all');
+if (selectAll) {
+  selectAll.addEventListener('change', function () {
+    document.querySelectorAll('.row-check').forEach(function (cb) {
+      cb.checked = selectAll.checked;
+    });
+    syncAddButtons();
+  });
+}
+
+document.querySelectorAll('.row-check').forEach(function (cb) {
+  cb.addEventListener('change', syncAddButtons);
+});
+</script>
+
+{% endblock %}
