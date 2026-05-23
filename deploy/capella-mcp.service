@@ -1,0 +1,16 @@
+[Unit]
+Description=Capella Fabric Generator MCP Server
+After=network.target
+
+[Service]
+User=www-data
+WorkingDirectory=/opt/capella-fabric-generator
+Environment="CAPELLA_TOOLS_PATH=/opt/Capella_Tools"
+ExecStart=/opt/capella-fabric-generator/.venv/bin/python mcp_server.py
+Restart=always
+RestartSec=5
+StandardOutput=append:/var/log/capella-fabric/mcp-access.log
+StandardError=append:/var/log/capella-fabric/mcp-error.log
+
+[Install]
+WantedBy=multi-user.target

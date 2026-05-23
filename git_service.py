@@ -1,0 +1,33 @@
+# git_service.py — clone a GitHub repo into a Capella Fabric Generator session directory.
+# Replaces save_upload() + unpack_archive() for the MCP server workflow.
+
+import git
+import capella_service as svc
+
+
+def clone_repo(repo_url: str, pat: str, session_id: str) -> None:
+    """Clone a GitHub repo using a PAT into <session>/unpacked/.
+
+    The PAT is injected into the HTTPS URL at call time and never written
+    to disk or exposed in log messages.
+    """
+    clone_dir = svc._session_dir(session_id) / 'unpacked'
+    clone_dir.mkdir(exist_ok=True)
+    auth_url = _inject_pat(repo_url, pat)
+    try:
+        git.Repo.clone_from(auth_url, str(clone_dir))
+    except git.GitCommandError as exc:
+        raise RuntimeError(_scrub_pat(str(exc), pat)) from None
+
+
+def _inject_pat(url: str, pat: str) -> str:
+    """Return the URL with oauth2:<pat>@ injected after the scheme."""
+    if '://' in url:
+        scheme, rest = url.split('://', 1)
+        return f"{scheme}://oauth2:{pat}@{rest}"
+    return f"https://oauth2:{pat}@{url}"
+
+
+def _scrub_pat(msg: str, pat: str) -> str:
+    """Remove the raw PAT from an error string before it can be logged."""
+    return msg.replace(pat, '***') if pat else msg

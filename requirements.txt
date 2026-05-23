@@ -1,3 +1,5 @@
 flask>=3.0
 capellambse>=0.6
 gunicorn>=21.0
+mcp[cli]>=1.0
+gitpython>=3.1
