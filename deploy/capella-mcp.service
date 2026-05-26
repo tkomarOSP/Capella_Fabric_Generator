@@ -5,7 +5,7 @@ After=network.target
 [Service]
 User=www-data
 WorkingDirectory=/opt/capella_fabric_generator
-Environment="CAPELLA_TOOLS_PATH=/opt/Capella_Tools"
+Environment="CAPELLA_TOOLS_PATH=/opt/capella_tools"
 ExecStart=/opt/capella_fabric_generator/.venv/bin/python mcp_server.py
 Restart=always
 RestartSec=5
