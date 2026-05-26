@@ -28,6 +28,7 @@ if str(_CAPELLA_TOOLS) not in sys.path:
     sys.path.insert(0, str(_CAPELLA_TOOLS))
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 import capella_service as svc
 import git_service as git_svc
 
@@ -35,6 +36,15 @@ mcp = FastMCP(
     "Capella Fabric Generator",
     host='127.0.0.1',
     port=8001,
+    transport_security=TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=[
+            "mcp.innovatingwithcapella.com",
+            "127.0.0.1:*",
+            "localhost:*",
+            "[::1]:*",
+        ],
+    ),
     instructions=(
         "Use clone_capella_repo first to establish a session, then browse or "
         "resolve UUIDs, then generate_fabric to get the YAML content. "
