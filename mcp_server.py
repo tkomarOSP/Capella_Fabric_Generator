@@ -33,6 +33,8 @@ import git_service as git_svc
 
 mcp = FastMCP(
     "Capella Fabric Generator",
+    host='127.0.0.1',
+    port=8001,
     instructions=(
         "Use clone_capella_repo first to establish a session, then browse or "
         "resolve UUIDs, then generate_fabric to get the YAML content. "
@@ -209,4 +211,4 @@ def cleanup_session(session_id: str) -> dict:
 # ---------------------------------------------------------------------------
 
 if __name__ == '__main__':
-    mcp.run(transport='streamable-http', host='127.0.0.1', port=8001)
+    mcp.run(transport='streamable-http')
