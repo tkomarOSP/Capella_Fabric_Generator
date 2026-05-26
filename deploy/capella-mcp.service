@@ -4,9 +4,9 @@ After=network.target
 
 [Service]
 User=www-data
-WorkingDirectory=/opt/capella-fabric-generator
+WorkingDirectory=/opt/capella_fabric_generator
 Environment="CAPELLA_TOOLS_PATH=/opt/Capella_Tools"
-ExecStart=/opt/capella-fabric-generator/.venv/bin/python mcp_server.py
+ExecStart=/opt/capella_fabric_generator/.venv/bin/python mcp_server.py
 Restart=always
 RestartSec=5
 StandardOutput=append:/var/log/capella-fabric/mcp-access.log
