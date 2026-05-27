@@ -94,9 +94,10 @@ def find_aird_file(session_id: str) -> Path | None:
 # Model loading
 # ---------------------------------------------------------------------------
 
-def open_model(aird_path: Path) -> capellambse.MelodyModel:
-    """Open a Capella 7.0.1 model from an .aird file path."""
-    return capellambse.MelodyModel(str(aird_path))
+def open_model(aird_path: Path, resources: dict | None = None) -> capellambse.MelodyModel:
+    """Open a Capella model, optionally with dependency library resources."""
+    kwargs = {'resources': resources} if resources else {}
+    return capellambse.MelodyModel(str(aird_path), **kwargs)
 
 
 # ---------------------------------------------------------------------------

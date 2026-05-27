@@ -19,6 +19,7 @@
 #   }
 
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -31,6 +32,12 @@ from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 import capella_service as svc
 import git_service as git_svc
+
+
+def _find_aird_in(directory: Path) -> Path | None:
+    """Return the first .aird file found recursively under directory, or None."""
+    hits = list(directory.rglob('*.aird'))
+    return hits[0] if hits else None
 
 
 def _resolve_object_type(phase: str, object_type: str) -> str | None:
@@ -63,6 +70,7 @@ mcp = FastMCP(
     ),
     instructions=(
         "Use clone_capella_repo first to establish a session. "
+        "If the model depends on library repos, call add_dependency_repo for each before browsing. "
         "Call list_object_types() to discover valid phase/object_type combinations before browsing. "
         "Then browse or resolve UUIDs, then generate_fabric to get the YAML content. "
         "Call cleanup_session when done to release disk space."
@@ -78,23 +86,26 @@ mcp = FastMCP(
 def clone_capella_repo(
     repo_url: str,
     github_pat: str,
+    branch: str = "",
     include_realized: bool = False,
     include_realizing: bool = False,
 ) -> dict:
     """Clone a GitHub repository containing a Capella model.
 
     Returns a session_id used by all subsequent tools.
+    If the model depends on library repos, call add_dependency_repo next.
 
     Args:
         repo_url: HTTPS URL of the GitHub repository
                   (e.g. https://github.com/owner/repo or https://github.com/owner/repo.git)
         github_pat: GitHub personal access token with repo read access
+        branch: Git branch to clone (default: repo's default branch)
         include_realized: Include realized references in the generated fabric
         include_realizing: Include realizing references in the generated fabric
     """
     session_id = svc.create_session()
     try:
-        git_svc.clone_repo(repo_url, github_pat, session_id)
+        git_svc.clone_repo(repo_url, github_pat, session_id, branch=branch)
     except Exception as exc:
         svc.cleanup_session(session_id)
         return {"error": str(exc)}
@@ -113,6 +124,7 @@ def clone_capella_repo(
         'include_realized':  include_realized,
         'include_realizing': include_realizing,
         'yaml_path':         None,
+        'resources':         {},
     })
     return {
         "session_id": session_id,
@@ -143,7 +155,7 @@ def browse_model(session_id: str, phase: str, object_type: str) -> list[dict]:
         return [{"error": f"Unknown object_type '{object_type}' for phase {phase}. Valid types: {valid}"}]
     try:
         session = svc.load_session(session_id)
-        model   = svc.open_model(Path(session['aird_path']))
+        model   = svc.open_model(Path(session['aird_path']), resources=session.get('resources') or None)
         return svc.search_by_name(model, phase, canonical, '')
     except Exception as exc:
         return [{"error": str(exc)}]
@@ -177,7 +189,7 @@ def search_model_objects(
         return [{"error": f"Unknown object_type '{object_type}' for phase {phase}. Valid types: {valid}"}]
     try:
         session = svc.load_session(session_id)
-        model   = svc.open_model(Path(session['aird_path']))
+        model   = svc.open_model(Path(session['aird_path']), resources=session.get('resources') or None)
         return svc.search_by_name(model, phase, canonical, name_query)
     except Exception as exc:
         return [{"error": str(exc)}]
@@ -233,7 +245,55 @@ def generate_fabric(session_id: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Tool 6 — List valid object types (no session required)
+# Tool 6 — Add a dependency library repository to the session
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def add_dependency_repo(
+    session_id:    str,
+    repo_url:      str,
+    github_pat:    str,
+    resource_name: str,
+    branch:        str = "",
+) -> dict:
+    """Clone a dependency library repository and register it with the session.
+
+    Call after clone_capella_repo, before browse_model or generate_fabric.
+    resource_name must match the name used in the main model's cross-references
+    (e.g. "Bike BrakeSystem Library"). Can be called multiple times for multiple libraries.
+
+    Args:
+        session_id:    Session ID returned by clone_capella_repo
+        repo_url:      HTTPS URL of the dependency repository
+        github_pat:    GitHub PAT with repo read access
+        resource_name: Name this library is referenced by in the main model
+        branch:        Git branch to clone (default: repo's default branch)
+    """
+    try:
+        session  = svc.load_session(session_id)
+        safe_dir = re.sub(r'[^\w\-]', '_', resource_name)
+        dep_dir  = svc._session_dir(session_id) / 'deps' / safe_dir
+        git_svc.clone_to_dir(repo_url, github_pat, dep_dir, branch=branch)
+    except Exception as exc:
+        return {"error": str(exc)}
+
+    aird = _find_aird_in(dep_dir)
+    if aird is None:
+        return {"error": f"No .aird file found in dependency repo '{resource_name}'."}
+
+    model_folder = str(aird.parent)
+    session.setdefault('resources', {})[resource_name] = {"path": model_folder}
+    svc.save_session(session_id, session)
+    return {
+        "resource_name": resource_name,
+        "model_folder":  model_folder,
+        "aird_file":     aird.name,
+        "message":       f"Dependency '{resource_name}' registered. Proceed with browse_model or generate_fabric.",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Tool 7 — List valid object types (no session required)
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
@@ -248,7 +308,7 @@ def list_object_types() -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Tool 7 — Cleanup
+# Tool 8 — Cleanup
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
