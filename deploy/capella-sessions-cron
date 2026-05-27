@@ -1,0 +1,4 @@
+# Capella Fabric session cleanup — runs every hour as www-data
+# Install: sudo cp deploy/capella-sessions-cron /etc/cron.d/capella-sessions
+#          sudo chmod 644 /etc/cron.d/capella-sessions
+0 * * * * www-data /opt/capella_fabric_generator/deploy/cleanup_sessions.sh
