@@ -32,6 +32,22 @@ from mcp.server.transport_security import TransportSecuritySettings
 import capella_service as svc
 import git_service as git_svc
 
+
+def _resolve_object_type(phase: str, object_type: str) -> str | None:
+    """Return the canonical object_type key for the given phase, or None if unrecognised.
+
+    Matching is case-insensitive and tolerates underscores/hyphens in place of spaces,
+    so "functional_chain", "Functional Chain", and "functional chain" all resolve to
+    "Functional Chain".
+    """
+    valid = svc.get_phase_types().get(phase, [])
+    needle = object_type.strip().lower().replace('_', ' ').replace('-', ' ')
+    for t in valid:
+        if t.lower() == needle:
+            return t
+    return None
+
+
 mcp = FastMCP(
     "Capella Fabric Generator",
     host='127.0.0.1',
@@ -46,8 +62,9 @@ mcp = FastMCP(
         ],
     ),
     instructions=(
-        "Use clone_capella_repo first to establish a session, then browse or "
-        "resolve UUIDs, then generate_fabric to get the YAML content. "
+        "Use clone_capella_repo first to establish a session. "
+        "Call list_object_types() to discover valid phase/object_type combinations before browsing. "
+        "Then browse or resolve UUIDs, then generate_fabric to get the YAML content. "
         "Call cleanup_session when done to release disk space."
     ),
 )
@@ -112,15 +129,22 @@ def clone_capella_repo(
 def browse_model(session_id: str, phase: str, object_type: str) -> list[dict]:
     """List all objects of a given type within a Capella model phase.
 
+    Call list_object_types() first to see valid phase/object_type combinations.
+    object_type matching is case-insensitive (e.g. "functional chain" works).
+
     Args:
         session_id:  Session ID returned by clone_capella_repo
         phase:       One of OA, SA, LA, PA
-        object_type: Object type within that phase (e.g. Component, Requirement, Function)
+        object_type: Object type within that phase — call list_object_types() for valid values
     """
+    canonical = _resolve_object_type(phase, object_type)
+    if canonical is None:
+        valid = svc.get_phase_types().get(phase, [])
+        return [{"error": f"Unknown object_type '{object_type}' for phase {phase}. Valid types: {valid}"}]
     try:
         session = svc.load_session(session_id)
         model   = svc.open_model(Path(session['aird_path']))
-        return svc.search_by_name(model, phase, object_type, '')
+        return svc.search_by_name(model, phase, canonical, '')
     except Exception as exc:
         return [{"error": str(exc)}]
 
@@ -138,16 +162,23 @@ def search_model_objects(
 ) -> list[dict]:
     """Search model objects by name (case-insensitive substring match).
 
+    Call list_object_types() first to see valid phase/object_type combinations.
+    object_type matching is case-insensitive (e.g. "functional chain" works).
+
     Args:
         session_id:  Session ID returned by clone_capella_repo
         phase:       One of OA, SA, LA, PA
-        object_type: Object type within that phase
+        object_type: Object type within that phase — call list_object_types() for valid values
         name_query:  Substring to match against object names
     """
+    canonical = _resolve_object_type(phase, object_type)
+    if canonical is None:
+        valid = svc.get_phase_types().get(phase, [])
+        return [{"error": f"Unknown object_type '{object_type}' for phase {phase}. Valid types: {valid}"}]
     try:
         session = svc.load_session(session_id)
         model   = svc.open_model(Path(session['aird_path']))
-        return svc.search_by_name(model, phase, object_type, name_query)
+        return svc.search_by_name(model, phase, canonical, name_query)
     except Exception as exc:
         return [{"error": str(exc)}]
 
@@ -202,7 +233,22 @@ def generate_fabric(session_id: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Tool 6 — Cleanup
+# Tool 6 — List valid object types (no session required)
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def list_object_types() -> dict:
+    """Return all valid phase and object_type values for browse_model and search_model_objects.
+
+    Call this before browse_model if unsure what object types exist for a phase.
+    Returns a dict mapping phase (OA/SA/LA/PA) to a list of valid object_type strings.
+    No session required.
+    """
+    return svc.get_phase_types()
+
+
+# ---------------------------------------------------------------------------
+# Tool 7 — Cleanup
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
