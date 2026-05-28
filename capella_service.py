@@ -259,7 +259,7 @@ def generate_fabric(session: dict) -> tuple[Path, int]:
     include_realizing: bool = session.get('include_realizing', False)
     session_id: str = session['session_id']
 
-    model = open_model(aird_path)
+    model = open_model(aird_path, resources=session.get('resources') or None)
 
     handler = CapellaYAMLHandler()
     handler.set_realized_refs(include_realized)

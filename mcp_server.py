@@ -209,7 +209,7 @@ def resolve_model_uuids(session_id: str, uuids: list[str]) -> dict:
     """
     try:
         session              = svc.load_session(session_id)
-        model                = svc.open_model(Path(session['aird_path']))
+        model                = svc.open_model(Path(session['aird_path']), resources=session.get('resources') or None)
         resolved, not_found  = svc.resolve_uuids(model, uuids)
         session['resolved_uuids'] = [r['uuid'] for r in resolved]
         svc.save_session(session_id, session)
