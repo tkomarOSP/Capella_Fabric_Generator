@@ -1,3 +1,5 @@
+# Copyright 2024-2026 Open Sun Power, LLC
+# SPDX-License-Identifier: Apache-2.0
 # mcp_server.py — Capella Fabric Generator MCP Server
 #
 # Exposes the same browse / resolve / generate workflow as the web app,
@@ -73,7 +75,8 @@ mcp = FastMCP(
         "If the model depends on library repos, call add_dependency_repo for each before browsing. "
         "Call list_object_types() to discover valid phase/object_type combinations before browsing. "
         "Then browse or resolve UUIDs, then generate_fabric to get the YAML content. "
-        "Call cleanup_session when done to release disk space."
+        "Call cleanup_session when done to release disk space. "
+        "© Open Sun Power, LLC — Apache 2.0."
     ),
 )
 

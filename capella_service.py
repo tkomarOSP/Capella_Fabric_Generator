@@ -1,5 +1,6 @@
-# Copyright — Capella Fabric Generator
-# Service layer: model loading, UUID resolution, YAML fabric generation.
+# Copyright 2024-2026 Open Sun Power, LLC
+# SPDX-License-Identifier: Apache-2.0
+# Capella Fabric Generator — service layer: model loading, UUID resolution, YAML fabric generation.
 
 import os
 import sys

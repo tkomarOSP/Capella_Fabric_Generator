@@ -1,3 +1,5 @@
+# Copyright 2024-2026 Open Sun Power, LLC
+# SPDX-License-Identifier: Apache-2.0
 # Capella Fabric Generator — Flask application
 # Routes: / → /inspect → /generate → /download/<session_id>
 

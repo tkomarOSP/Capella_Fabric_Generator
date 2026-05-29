@@ -1,3 +1,5 @@
+# Copyright 2024-2026 Open Sun Power, LLC
+# SPDX-License-Identifier: Apache-2.0
 # git_service.py — clone a GitHub repo into a Capella Fabric Generator session directory.
 # Replaces save_upload() + unpack_archive() for the MCP server workflow.
 
