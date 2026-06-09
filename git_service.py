@@ -45,3 +45,25 @@ def _inject_pat(url: str, pat: str) -> str:
 def _scrub_pat(msg: str, pat: str) -> str:
     """Remove the raw PAT from an error string before it can be logged."""
     return msg.replace(pat, '***') if pat else msg
+
+
+def commit_changes(session_id: str, message: str) -> dict:
+    """Stage all modified files and commit in the session clone (unpacked/)."""
+    repo_dir = svc._session_dir(session_id) / 'unpacked'
+    repo = git.Repo(str(repo_dir))
+    repo.git.add(A=True)
+    if not repo.is_dirty(index=True):
+        return {"status": "no_changes"}
+    repo.index.commit(message)
+    return {"status": "committed", "sha": repo.head.commit.hexsha[:8]}
+
+
+def push_changes(session_id: str) -> dict:
+    """Push committed changes to remote origin."""
+    repo_dir = svc._session_dir(session_id) / 'unpacked'
+    repo = git.Repo(str(repo_dir))
+    push_info = repo.remote('origin').push()
+    errors = [str(pi) for pi in push_info if pi.flags & pi.ERROR]
+    if errors:
+        return {"status": "error", "message": "; ".join(errors)}
+    return {"status": "ok", "ref": str(push_info[0].remote_ref_string)}

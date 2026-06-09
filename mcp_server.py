@@ -311,7 +311,90 @@ def list_object_types() -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Tool 8 — Cleanup
+# Tools 8-10 — Write / verify / push
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def apply_model_patch(
+    session_id: str,
+    patch_yaml: str,
+    commit_message: str,
+) -> dict:
+    """Apply a declarative YAML patch to the Capella model, save, and git-commit.
+
+    Uses py-capellambse's decl.apply() format. Target existing elements with
+    `!uuid <uuid>` and use `set:` to update properties or `extend:` to add
+    children. Use `promise_id:` / `!promise` for forward-references within the
+    same patch.
+
+    Scope convention: limit creation to structure (components/entities),
+    functions, and activities. Call push_model_changes afterward to sync to
+    GitHub.
+
+    patch_yaml example (YAML string):
+        - parent: !uuid <parent-component-uuid>
+          extend:
+            components:
+              - name: New Subsystem
+            functions:
+              - name: Process Input Data
+
+    Args:
+        session_id:     Session ID from clone_capella_repo.
+        patch_yaml:     Declarative YAML document (list of patch entries).
+        commit_message: Git commit message describing this change.
+    """
+    try:
+        session = svc.load_session(session_id)
+        result  = svc.apply_patch(session, patch_yaml)
+        if result['status'] != 'ok':
+            return result
+        commit_result = git_svc.commit_changes(session_id, commit_message)
+        return {"patch": result, "commit": commit_result}
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+
+
+@mcp.tool()
+def push_model_changes(session_id: str) -> dict:
+    """Push all committed model changes to the remote GitHub repository.
+
+    Call after one or more apply_model_patch calls when ready to persist.
+    The session's git remote already carries credentials from clone_capella_repo.
+
+    Args:
+        session_id: Session ID from clone_capella_repo.
+    """
+    try:
+        return git_svc.push_changes(session_id)
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+
+
+@mcp.tool()
+def verify_model(session_id: str, phase: str) -> dict:
+    """Scan a model phase for common quality issues.
+
+    Checks performed:
+      - Elements with missing or empty names
+      - Functions not allocated to any component (SA / LA / PA)
+
+    Returns findings grouped by category with object info for each issue.
+    An empty findings dict means no issues were found.
+
+    Args:
+        session_id: Session ID from clone_capella_repo.
+        phase:      OA, SA, LA, or PA.
+    """
+    try:
+        session = svc.load_session(session_id)
+        return svc.verify_phase(session, phase)
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+
+
+# ---------------------------------------------------------------------------
+# Tool 11 — Cleanup
 # ---------------------------------------------------------------------------
 
 @mcp.tool()

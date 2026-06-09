@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Capella Fabric Generator — service layer: model loading, UUID resolution, YAML fabric generation.
 
+import io
 import os
 import sys
 import re
@@ -20,6 +21,7 @@ if str(_CAPELLA_TOOLS) not in sys.path:
     sys.path.insert(0, str(_CAPELLA_TOOLS))
 
 import capellambse
+from capellambse import decl
 from capella_tools.capellambse_yaml_manager import CapellaYAMLHandler
 
 # ---------------------------------------------------------------------------
@@ -290,3 +292,77 @@ def generate_fabric(session: dict) -> tuple[Path, int]:
         f.write('\n')
 
     return yaml_path, object_count
+
+
+# ---------------------------------------------------------------------------
+# Declarative patch (write)
+# ---------------------------------------------------------------------------
+
+def apply_patch(session: dict, patch_yaml: str) -> dict:
+    """Apply a declarative YAML patch to the model and save it to disk."""
+    aird_path = Path(session['aird_path'])
+    model = open_model(aird_path, resources=session.get('resources') or None)
+    try:
+        decl.apply(model, io.StringIO(patch_yaml))
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+    model.save()
+    return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# Verification / quality scan
+# ---------------------------------------------------------------------------
+
+_VERIFY_ACCESSORS: dict[str, dict[str, object]] = {
+    "OA": {
+        "entities":   lambda m: m.oa.all_entities,
+        "activities": lambda m: m.oa.all_activities,
+    },
+    "SA": {
+        "components": lambda m: m.sa.all_components,
+        "functions":  lambda m: m.sa.all_functions,
+    },
+    "LA": {
+        "components": lambda m: m.la.all_components,
+        "functions":  lambda m: m.la.all_functions,
+    },
+    "PA": {
+        "components": lambda m: m.pa.all_components,
+        "functions":  lambda m: m.pa.all_functions,
+    },
+}
+
+
+def verify_phase(session: dict, phase: str) -> dict:
+    """Scan a model phase for common quality issues."""
+    accessors = _VERIFY_ACCESSORS.get(phase.upper())
+    if not accessors:
+        return {"status": "error", "message": f"Unknown phase: {phase}. Use OA, SA, LA, or PA."}
+
+    model = open_model(Path(session['aird_path']), resources=session.get('resources') or None)
+    findings: dict[str, list[dict]] = {}
+
+    for label, getter in accessors.items():
+        unnamed = [_object_info(o) for o in getter(model) if not getattr(o, 'name', '').strip()]
+        if unnamed:
+            findings[f"unnamed_{label}"] = unnamed
+
+    if phase.upper() in ("SA", "LA", "PA"):
+        fn_getter = accessors.get("functions")
+        if fn_getter:
+            unallocated = []
+            for fn in fn_getter(model):
+                try:
+                    if not fn.allocating_components:
+                        unallocated.append(_object_info(fn))
+                except Exception:
+                    pass
+            if unallocated:
+                findings["unallocated_functions"] = unallocated
+
+    return {
+        "phase": phase.upper(),
+        "findings": findings,
+        "total_issues": sum(len(v) for v in findings.values()),
+    }
