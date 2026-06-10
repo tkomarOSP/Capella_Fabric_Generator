@@ -47,14 +47,21 @@ def _scrub_pat(msg: str, pat: str) -> str:
     return msg.replace(pat, '***') if pat else msg
 
 
-def commit_changes(session_id: str, message: str) -> dict:
+def commit_changes(
+    session_id: str,
+    message: str,
+    author_name: str = "",
+    author_email: str = "",
+) -> dict:
     """Stage all modified files and commit in the session clone (unpacked/)."""
     repo_dir = svc._session_dir(session_id) / 'unpacked'
     repo = git.Repo(str(repo_dir))
     repo.git.add(A=True)
     if not repo.is_dirty(index=True):
         return {"status": "no_changes"}
-    repo.index.commit(message)
+    author = git.Actor(author_name, author_email) if author_name else None
+    kwargs = {"author": author} if author else {}
+    repo.index.commit(message, **kwargs)
     return {"status": "committed", "sha": repo.head.commit.hexsha[:8]}
 
 

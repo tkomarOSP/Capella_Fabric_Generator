@@ -319,6 +319,8 @@ def apply_model_patch(
     session_id: str,
     patch_yaml: str,
     commit_message: str,
+    author_name: str = "",
+    author_email: str = "",
 ) -> dict:
     """Apply a declarative YAML patch to the Capella model, save, and git-commit.
 
@@ -343,13 +345,18 @@ def apply_model_patch(
         session_id:     Session ID from clone_capella_repo.
         patch_yaml:     Declarative YAML document (list of patch entries).
         commit_message: Git commit message describing this change.
+        author_name:    Git author name (e.g. "Tony Komar"). Defaults to the
+                        server's configured git identity if omitted.
+        author_email:   Git author e-mail address.
     """
     try:
         session = svc.load_session(session_id)
         result  = svc.apply_patch(session, patch_yaml)
         if result['status'] != 'ok':
             return result
-        commit_result = git_svc.commit_changes(session_id, commit_message)
+        commit_result = git_svc.commit_changes(
+            session_id, commit_message, author_name, author_email
+        )
         return {"patch": result, "commit": commit_result}
     except Exception as exc:
         return {"status": "error", "message": str(exc)}
