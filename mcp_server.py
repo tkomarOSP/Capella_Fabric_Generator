@@ -329,6 +329,12 @@ def apply_model_patch(
     children. Use `promise_id:` / `!promise` for forward-references within the
     same patch.
 
+    Function/activity types are automatically enforced: the parent object's
+    Capella layer determines whether OperationalActivity, SystemFunction,
+    LogicalFunction, or PhysicalFunction is used. Explicit `_type` values in
+    the patch are overridden if they conflict with the parent's layer, so you
+    may omit `_type` entirely for function/activity entries.
+
     Scope convention: limit creation to structure (components/entities),
     functions, and activities. Call push_model_changes afterward to sync to
     GitHub.
@@ -340,6 +346,7 @@ def apply_model_patch(
               - name: New Subsystem
             functions:
               - name: Process Input Data
+                # _type is injected automatically from parent's phase
 
     Args:
         session_id:     Session ID from clone_capella_repo.

@@ -20,6 +20,7 @@ _CAPELLA_TOOLS = Path(os.environ.get('CAPELLA_TOOLS_PATH', r'C:\apps\.metadata\C
 if str(_CAPELLA_TOOLS) not in sys.path:
     sys.path.insert(0, str(_CAPELLA_TOOLS))
 
+import yaml
 import capellambse
 from capellambse import decl
 from capella_tools.capellambse_yaml_manager import CapellaYAMLHandler
@@ -298,12 +299,96 @@ def generate_fabric(session: dict) -> tuple[Path, int]:
 # Declarative patch (write)
 # ---------------------------------------------------------------------------
 
+# capellambse decl uses !uuid and !promise custom YAML tags; round-trip them
+# through our pre-processing by subclassing the loader/dumper so we never
+# touch the global yaml.SafeLoader / yaml.SafeDumper singletons.
+
+class _UUIDRef:
+    def __init__(self, value: str): self.value = value
+
+class _PromiseRef:
+    def __init__(self, value: str): self.value = value
+
+class _PatchLoader(yaml.SafeLoader): pass
+class _PatchDumper(yaml.SafeDumper): pass
+
+_PatchLoader.add_constructor('!uuid',    lambda l, n: _UUIDRef(l.construct_scalar(n)))
+_PatchLoader.add_constructor('!promise', lambda l, n: _PromiseRef(l.construct_scalar(n)))
+_PatchDumper.add_representer(_UUIDRef,    lambda d, v: d.represent_scalar('!uuid', v.value))
+_PatchDumper.add_representer(_PromiseRef, lambda d, v: d.represent_scalar('!promise', v.value))
+
+# ARCADIA phase → required Capella class for function/activity children
+_PHASE_FUNCTION_TYPE: dict[str, str] = {
+    'OA': 'OperationalActivity',
+    'SA': 'SystemFunction',
+    'LA': 'LogicalFunction',
+    'PA': 'PhysicalFunction',
+}
+
+# extend: attribute names that hold function/activity children
+_FUNCTION_ATTRS = frozenset({
+    'functions', 'owned_functions',
+    'activities', 'owned_activities',
+})
+
+
+def _resolve_phase_for_uuid(model, uuid_str: str) -> str:
+    """Walk the parent chain from a UUID'd object to determine its Capella layer."""
+    try:
+        current = model.by_uuid(uuid_str)
+        for _ in range(20):
+            phase = _layer_from_type(type(current).__name__)
+            if phase != '—':
+                return phase
+            parent = getattr(current, 'parent', None) or getattr(current, 'owner', None)
+            if parent is None or parent is current:
+                break
+            current = parent
+    except Exception:
+        pass
+    return '—'
+
+
+def _enforce_function_types(model, patch_data: list) -> None:
+    """Inject/correct _type on function/activity children based on each parent's phase."""
+    for item in patch_data:
+        if not isinstance(item, dict):
+            continue
+        parent_ref = item.get('parent')
+        if not isinstance(parent_ref, _UUIDRef):
+            continue
+        phase = _resolve_phase_for_uuid(model, parent_ref.value)
+        correct_type = _PHASE_FUNCTION_TYPE.get(phase)
+        if not correct_type:
+            continue
+        extend = item.get('extend', {})
+        if not isinstance(extend, dict):
+            continue
+        for attr in _FUNCTION_ATTRS:
+            for child in extend.get(attr, []):
+                if isinstance(child, dict):
+                    child['_type'] = correct_type  # inject if absent, correct if wrong
+
+
+def _preprocess_patch(model, patch_yaml: str) -> str:
+    """Parse patch YAML, enforce ARCADIA function type conventions, re-serialize."""
+    try:
+        patch_data = yaml.load(patch_yaml, Loader=_PatchLoader)
+    except yaml.YAMLError:
+        return patch_yaml  # pass through; decl.apply() will surface the error
+    if not isinstance(patch_data, list):
+        return patch_yaml
+    _enforce_function_types(model, patch_data)
+    return yaml.dump(patch_data, Dumper=_PatchDumper, default_flow_style=False, allow_unicode=True)
+
+
 def apply_patch(session: dict, patch_yaml: str) -> dict:
     """Apply a declarative YAML patch to the model and save it to disk."""
     aird_path = Path(session['aird_path'])
     model = open_model(aird_path, resources=session.get('resources') or None)
+    processed_yaml = _preprocess_patch(model, patch_yaml)
     try:
-        decl.apply(model, io.StringIO(patch_yaml))
+        decl.apply(model, io.StringIO(processed_yaml))
     except Exception as exc:
         return {"status": "error", "message": str(exc)}
     model.save()
