@@ -370,8 +370,43 @@ def _enforce_function_types(model, patch_data: list) -> None:
                     child['_type'] = correct_type  # inject if absent, correct if wrong
 
 
+def _pv_type_from_value(value) -> str | None:
+    """Return the correct capellambse PropertyValue class name for a Python value."""
+    if isinstance(value, bool):  return 'BooleanPropertyValue'   # bool before int!
+    if isinstance(value, int):   return 'IntegerPropertyValue'
+    if isinstance(value, float): return 'FloatPropertyValue'
+    if isinstance(value, str):   return 'StringPropertyValue'
+    return None
+
+
+def _enforce_pv_types(patch_data: list) -> None:
+    """Inject _type on PropertyValueGroup and property value children where absent."""
+    for item in patch_data:
+        if not isinstance(item, dict):
+            continue
+        for block_key in ('extend', 'set'):
+            block = item.get(block_key, {})
+            if not isinstance(block, dict):
+                continue
+            for pvg in block.get('property_value_groups', []):
+                if not isinstance(pvg, dict):
+                    continue
+                if '_type' not in pvg:
+                    pvg['_type'] = 'PropertyValueGroup'
+                for pv in pvg.get('property_values', []):
+                    if isinstance(pv, dict) and '_type' not in pv:
+                        t = _pv_type_from_value(pv.get('value'))
+                        if t:
+                            pv['_type'] = t
+            for pv in block.get('property_values', []):
+                if isinstance(pv, dict) and '_type' not in pv:
+                    t = _pv_type_from_value(pv.get('value'))
+                    if t:
+                        pv['_type'] = t
+
+
 def _preprocess_patch(model, patch_yaml: str) -> str:
-    """Parse patch YAML, enforce ARCADIA function type conventions, re-serialize."""
+    """Parse patch YAML, enforce ARCADIA type conventions, re-serialize."""
     try:
         patch_data = yaml.load(patch_yaml, Loader=_PatchLoader)
     except yaml.YAMLError:
@@ -379,6 +414,7 @@ def _preprocess_patch(model, patch_yaml: str) -> str:
     if not isinstance(patch_data, list):
         return patch_yaml
     _enforce_function_types(model, patch_data)
+    _enforce_pv_types(patch_data)
     return yaml.dump(patch_data, Dumper=_PatchDumper, default_flow_style=False, allow_unicode=True)
 
 

@@ -339,14 +339,28 @@ def apply_model_patch(
     functions, and activities. Call push_model_changes afterward to sync to
     GitHub.
 
-    patch_yaml example (YAML string):
+    patch_yaml examples (YAML string):
+
+        # Add a child component and function — _type auto-injected from phase:
         - parent: !uuid <parent-component-uuid>
           extend:
             components:
               - name: New Subsystem
             functions:
               - name: Process Input Data
-                # _type is injected automatically from parent's phase
+
+        # Add property values — _type auto-injected from the Python value type:
+        - parent: !uuid <component-uuid>
+          extend:
+            property_value_groups:
+              - name: Mass
+                property_values:
+                  - name: units
+                    value: kg          # str → StringPropertyValue
+                  - name: value
+                    value: 12.5        # float → FloatPropertyValue
+                  - name: max_value
+                    value: 15.0
 
     Args:
         session_id:     Session ID from clone_capella_repo.
