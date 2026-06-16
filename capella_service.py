@@ -331,6 +331,21 @@ _FUNCTION_ATTRS = frozenset({
     'activities', 'owned_activities',
 })
 
+# ARCADIA phase → required Capella class for component children
+# SA/LA use 'components'; PA uses 'owned_components' (→ ownedPhysicalComponents in XML).
+# Without _type the declarative engine creates malformed Part objects instead of
+# real PhysicalComponent/SystemComponent/LogicalComponent elements.
+_PHASE_COMPONENT_TYPE: dict[str, str] = {
+    'SA': 'SystemComponent',
+    'LA': 'LogicalComponent',
+    'PA': 'PhysicalComponent',
+}
+
+_COMPONENT_ATTRS = frozenset({
+    'components',        # SA, LA  (→ ownedSystemComponents / ownedLogicalComponents)
+    'owned_components',  # PA      (→ ownedPhysicalComponents)
+})
+
 
 def _resolve_phase_for_uuid(model, uuid_str: str) -> str:
     """Walk the parent chain from a UUID'd object to determine its Capella layer."""
@@ -368,6 +383,27 @@ def _enforce_function_types(model, patch_data: list) -> None:
             for child in extend.get(attr, []):
                 if isinstance(child, dict):
                     child['_type'] = correct_type  # inject if absent, correct if wrong
+
+
+def _enforce_component_types(model, patch_data: list) -> None:
+    """Inject _type on component children where absent to prevent Part object creation."""
+    for item in patch_data:
+        if not isinstance(item, dict):
+            continue
+        parent_ref = item.get('parent')
+        if not isinstance(parent_ref, _UUIDRef):
+            continue
+        phase = _resolve_phase_for_uuid(model, parent_ref.value)
+        correct_type = _PHASE_COMPONENT_TYPE.get(phase)
+        if not correct_type:
+            continue
+        extend = item.get('extend', {})
+        if not isinstance(extend, dict):
+            continue
+        for attr in _COMPONENT_ATTRS:
+            for child in extend.get(attr, []):
+                if isinstance(child, dict) and '_type' not in child:
+                    child['_type'] = correct_type
 
 
 def _pv_type_from_value(value) -> str | None:
@@ -414,6 +450,7 @@ def _preprocess_patch(model, patch_yaml: str) -> str:
     if not isinstance(patch_data, list):
         return patch_yaml
     _enforce_function_types(model, patch_data)
+    _enforce_component_types(model, patch_data)
     _enforce_pv_types(patch_data)
     return yaml.dump(patch_data, Dumper=_PatchDumper, default_flow_style=False, allow_unicode=True)
 
