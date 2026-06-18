@@ -66,7 +66,7 @@ Configure Claude Desktop (`~/.claude/claude_desktop_config.json`):
 {
   "mcpServers": {
     "capella-fabric": {
-      "url": "https://mcp.innovatingwithcapella.com/mcp"
+      "url": "https://fabric.innovatingwithcapella.com/mcp"
     }
   }
 }
