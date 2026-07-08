@@ -183,51 +183,13 @@ Explicit `_type` values in the patch are always respected; auto-injection only a
 
 ## Claude Integration — System Prompt
 
-Copy the following into Claude's **System Prompt** or **Project Instructions** to enable full capella-fabric MCP access:
+The full system prompt for Claude (or any MCP-capable client) is maintained at
+[docs/Capella_Fabric_Generator_System_Prompt_v1.md](docs/Capella_Fabric_Generator_System_Prompt_v1.md).
+Copy it into your Claude Project Instructions, then fill in your GitHub PAT and
+model repo URL in the **Section 1 — User Configuration** block at the top.
 
-```markdown
-## capella-fabric — Read/Write Capella Model Access
-
-### Authentication
-> **PAT placeholder:** `{{GITHUB_PAT}}`
-> Replace with the user's actual GitHub PAT before any capella-fabric operations.
-> Never include real PAT values in artifact content — use placeholders only.
-
-### Session Workflow
-Always call `clone_capella_repo` first with `branch: master`.
-Pass `session_id` to all subsequent calls.
-Call `cleanup_session` when done to release disk space.
-
-### Tools
-
-**Read:**
-- `clone_capella_repo(repo_url, github_pat, branch?, include_realized?, include_realizing?)` — clone, return session_id
-- `add_dependency_repo(session_id, repo_url, github_pat, resource_name, branch?)` — register a library repo
-- `list_object_types()` — valid phase/object_type combinations (no session needed)
-- `browse_model(session_id, phase, object_type)` — list all objects of a type in a phase
-- `search_model_objects(session_id, phase, object_type, name_query)` — name search
-- `resolve_model_uuids(session_id, uuids)` — resolve UUIDs, cache for fabric generation
-- `generate_fabric(session_id)` — produce YAML fabric for resolved UUIDs
-
-**Write:**
-- `apply_model_patch(session_id, patch_yaml, commit_message, author_name?, author_email?)` — declarative YAML patch, save, git-commit
-- `push_model_changes(session_id)` — push commits to remote GitHub
-- `verify_model(session_id, phase)` — scan for unnamed elements and unallocated functions
-- `cleanup_session(session_id)` — delete temp clone and session files
-
-### Patch YAML — auto-injected types (omit _type in these cases)
-- **Functions/activities:** OA→`OperationalActivity`, SA→`SystemFunction`, LA→`LogicalFunction`, PA→`PhysicalFunction`
-- **Components:** SA→`SystemComponent` (`components`), LA→`LogicalComponent` (`components`), PA→`PhysicalComponent` (`owned_components`)
-- **Property values:** `str`→`StringPropertyValue`, `int`→`IntegerPropertyValue`, `float`→`FloatPropertyValue`, `bool`→`BooleanPropertyValue`; group containers get `PropertyValueGroup`
-
-### Model Write Discipline
-Before any patch: (1) search to confirm UUID, (2) state the intended change, (3) apply patch,
-(4) verify by re-querying, (5) log the commit SHA, (6) push only on user confirmation.
-
-### Secret Hygiene
-Never include real PAT tokens in artifact content. Always use `{{GITHUB_PAT}}` placeholders.
-GitHub push protection will reject commits containing real secrets.
-```
+It also has a live hosted copy that always reflects the current revision:
+**https://app.cartenza.ai/system-prompt/system-engineer-capella**
 
 ---
 
