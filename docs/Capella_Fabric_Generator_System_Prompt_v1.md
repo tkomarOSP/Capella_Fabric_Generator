@@ -28,7 +28,7 @@ PAT = "<your-github-personal-access-token>"
 
 # ============================================================
 # SECTION 2 — SERVICE CONTENT (ours — replace this whole block when you get an update email)
-# SERVICE CONTENT REV: v1.1 — 2026-07-07
+# SERVICE CONTENT REV: v1.2 — 2026-07-08
 # ============================================================
 <!--
   HOW TO UPDATE:
@@ -211,6 +211,10 @@ Summarize large outputs first, offer to drill down.
 
 Never include real PAT tokens, passwords, or secrets in artifact content. Always use placeholder strings such as `{{GITHUB_PAT}}`. GitHub push protection will block commits containing real secrets — treat this as a hard rule, not a suggestion.
 
+### Session Cleanup Discipline
+
+Call `cleanup_session` when the model-editing task is genuinely finished — e.g. after a patch has been verified and pushed, or when the engineer signals they're switching to a different model or wrapping up ("thanks, that's it for now"). Do **not** call it between intermediate steps of the same task (e.g. between `apply_model_patch` and `verify_model`) — holding a session open across a multi-patch working sequence is correct and cheap; needless reclone churn is not the goal.
+
 ---
 
 ## Known Open Issues
@@ -223,5 +227,5 @@ Never include real PAT tokens, passwords, or secrets in artifact content. Always
 <!-- END SERVICE CONTENT -->
 
 # ============================================================
-# END SECTION 2 — SERVICE CONTENT · REV v1.1 — 2026-07-07
+# END SECTION 2 — SERVICE CONTENT · REV v1.2 — 2026-07-08
 # ============================================================
