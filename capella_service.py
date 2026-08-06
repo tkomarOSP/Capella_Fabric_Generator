@@ -416,7 +416,17 @@ def _pv_type_from_value(value) -> str | None:
 
 
 def _enforce_pv_types(patch_data: list) -> None:
-    """Inject _type on PropertyValueGroup and property value children where absent."""
+    """Inject _type on PropertyValueGroup and property value children where absent.
+
+    Also back-references each newly-extended group onto its owning component's
+    applied_property_value_groups (note-0028): owned_property_value_groups
+    (containment) and applied_property_value_groups (association) are
+    independent Capella attributes, so a group created via `extend:
+    property_value_groups:` alone is structurally present in the XML but never
+    counted as "applied" -- Capella silently ignores it. Assigns a promise_id
+    to the new group (if it doesn't already have one) and appends a matching
+    !promise reference into the same parent's applied_property_value_groups.
+    """
     for item in patch_data:
         if not isinstance(item, dict):
             continue
@@ -434,6 +444,14 @@ def _enforce_pv_types(patch_data: list) -> None:
                         t = _pv_type_from_value(pv.get('value'))
                         if t:
                             pv['_type'] = t
+                if block_key == 'extend':
+                    promise_id = pvg.get('promise_id')
+                    if not promise_id:
+                        promise_id = f"_pvg_{uuid.uuid4().hex}"
+                        pvg['promise_id'] = promise_id
+                    block.setdefault('applied_property_value_groups', []).append(
+                        _PromiseRef(promise_id)
+                    )
             for pv in block.get('property_values', []):
                 if isinstance(pv, dict) and '_type' not in pv:
                     t = _pv_type_from_value(pv.get('value'))
