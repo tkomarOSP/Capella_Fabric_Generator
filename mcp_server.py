@@ -75,6 +75,34 @@ mcp = FastMCP(
         "If the model depends on library repos, call add_dependency_repo for each before browsing. "
         "Call list_object_types() to discover valid phase/object_type combinations before browsing. "
         "Then browse or resolve UUIDs, then generate_fabric to get the YAML content. "
+        "apply_model_patch uses py-capellambse's declarative format: target existing elements "
+        "with !uuid <uuid>, use set: to update attributes and extend: to add children, and "
+        "promise_id:/!promise for forward-references within the same patch. The server "
+        "pre-processes patch YAML and auto-injects _type in three cases, so you may omit it "
+        "entirely: function/activity children of extend: functions:/owned_functions:/"
+        "activities:/owned_activities: get OperationalActivity (OA) / SystemFunction (SA) / "
+        "LogicalFunction (LA) / PhysicalFunction (PA) based on the parent's phase; component "
+        "children of extend: components: (SA -> SystemComponent, LA -> LogicalComponent) or "
+        "extend: owned_components: (PA -> PhysicalComponent) get the matching type -- without "
+        "_type, capellambse creates malformed Part objects instead. At the PA phase "
+        "specifically, always use owned_components:, not components: -- PhysicalComponent."
+        "components is a deprecated, non-model-coupled property on current capellambse and "
+        "extending it raises 'not model-coupled'; owned_components is the real containment. "
+        "(Older capellambse installs that predate this split don't have this quirk -- there "
+        "components: is already the real containment and works as-is.) Property value children "
+        "of extend: property_value_groups: get StringPropertyValue/FloatPropertyValue/"
+        "IntegerPropertyValue/BooleanPropertyValue from the Python value's type, and "
+        "PropertyValueGroup on the group itself; creating a group this way also automatically "
+        "back-references it onto the parent's applied_property_value_groups in the same patch "
+        "-- no separate follow-up patch is needed for Capella to treat the group as applied. "
+        "Explicit _type values are always respected; auto-injection only fills in when absent. "
+        "apply_model_patch cannot create FunctionalExchange/ComponentExchange/PhysicalLink "
+        "elements (extend: exchanges:/component_exchanges:/physical_links:) -- these connect "
+        "ports that this tool doesn't create or validate, so such patches are rejected with a "
+        "clear error rather than silently producing invalid XML. Create these directly in the "
+        "Capella desktop editor; renaming/retagging *existing* ones via set: name: still works "
+        "fine. Call verify_model after patching to scan for quality issues, then "
+        "push_model_changes to sync to GitHub. "
         "Call cleanup_session when done to release disk space. "
         "© Open Sun Power, LLC — Apache 2.0."
     ),
@@ -327,13 +355,11 @@ def apply_model_patch(
     Uses py-capellambse's decl.apply() format. Target existing elements with
     `!uuid <uuid>` and use `set:` to update properties or `extend:` to add
     children. Use `promise_id:` / `!promise` for forward-references within the
-    same patch.
-
-    Function/activity types are automatically enforced: the parent object's
-    Capella layer determines whether OperationalActivity, SystemFunction,
-    LogicalFunction, or PhysicalFunction is used. Explicit `_type` values in
-    the patch are overridden if they conflict with the parent's layer, so you
-    may omit `_type` entirely for function/activity entries.
+    same patch. See this server's own `instructions` (returned at connection
+    time) for the full `_type` auto-injection rules (function/activity,
+    component, property-value), the PA-phase `owned_components:` requirement,
+    the automatic property-value-group back-reference, and which `extend:`
+    targets are rejected (exchanges/component_exchanges/physical_links).
 
     Scope convention: limit creation to structure (components/entities),
     functions, and activities. Call push_model_changes afterward to sync to
@@ -349,7 +375,9 @@ def apply_model_patch(
             functions:
               - name: Process Input Data
 
-        # Add property values — _type auto-injected from the Python value type:
+        # Add a property value group — _type auto-injected, and the group is
+        # automatically applied to the parent in this same patch (no second
+        # patch needed):
         - parent: !uuid <component-uuid>
           extend:
             property_value_groups:
@@ -359,8 +387,6 @@ def apply_model_patch(
                     value: kg          # str → StringPropertyValue
                   - name: value
                     value: 12.5        # float → FloatPropertyValue
-                  - name: max_value
-                    value: 15.0
 
     Args:
         session_id:     Session ID from clone_capella_repo.

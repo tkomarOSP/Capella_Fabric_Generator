@@ -179,6 +179,16 @@ Derived from the Python value type after YAML parsing. The standard pattern is o
 
 Explicit `_type` values in the patch are always respected; auto-injection only applies when `_type` is absent.
 
+Creating a `property_value_groups:` entry this way also automatically writes the group's back-reference onto the parent's `applied_property_value_groups` in the same patch — Capella requires both the containment child *and* that back-reference to treat a group as actually applied, and the server now emits both from a single patch. No follow-up patch is needed.
+
+### PA-phase component containment
+
+At the PA phase, always use `owned_components:`, not `components:` — `PhysicalComponent.components` is a deprecated, non-model-coupled property on current capellambse, and extending it raises `"not model-coupled"`. `owned_components:` is the real containment. (On older capellambse installs that predate this split, `components:` is already the real containment and works fine as-is — the server detects which shape the loaded model's classes support and only rewrites `components:` -> `owned_components:` when the split exists.)
+
+### Exchanges and physical links are not supported via `extend:`
+
+`apply_model_patch` rejects `extend: exchanges:`, `component_exchanges:`, and `physical_links:` with a clear error rather than creating them — these all connect ports (`FunctionInputPort`/`FunctionOutputPort`, `PhysicalPort`) that this tool doesn't create or validate, and a malformed one is more work to find and remove than to draw correctly in the Capella desktop editor in the first place. Renaming/retagging *existing* exchanges or links via `set: name:` is unaffected and remains reliable.
+
 ---
 
 ## Claude Integration — System Prompt
