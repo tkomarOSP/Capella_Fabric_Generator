@@ -401,6 +401,86 @@ def _enforce_function_types(model, patch_data: list) -> None:
                     child['_type'] = correct_type  # inject if absent, correct if wrong
 
 
+_UNSUPPORTED_EXTEND_ATTRS = frozenset({
+    'exchanges', 'component_exchanges', 'physical_links',
+})
+
+
+def _reject_unsupported_exchange_creation(patch_data: list) -> None:
+    """Refuse to create FunctionalExchange/ComponentExchange/PhysicalLink
+    elements via extend: (note-0017).
+
+    These all connect ports (FunctionInputPort/FunctionOutputPort,
+    PhysicalPort), not the functions/components/UUIDs a patch typically
+    references directly. apply_model_patch's generic decl-based engine sets
+    source/target as raw IDREF associations with no validation that the
+    referenced UUID is actually a port -- it will happily wire an exchange's
+    target directly at a Function/Component's own UUID, producing a
+    structurally invalid, dangling reference that verify_model won't catch
+    (patch reports "ok", nothing flags the corruption). The Capella desktop
+    editor creates the backing ports as part of drawing the connection;
+    replicating that here isn't worth the complexity for something usually
+    faster to draw by hand than to describe, and a wrong auto-created
+    exchange is more work to find and remove than to just draw correctly.
+    Renaming/retagging *existing* exchanges/links via set: name: is
+    unaffected -- that pattern doesn't touch these keys under extend:.
+    """
+    for item in patch_data:
+        if not isinstance(item, dict):
+            continue
+        extend = item.get('extend', {})
+        if not isinstance(extend, dict):
+            continue
+        hit = _UNSUPPORTED_EXTEND_ATTRS & extend.keys()
+        if hit:
+            raise ValueError(
+                "apply_model_patch cannot create new "
+                f"{'/'.join(sorted(hit))} via extend: -- FunctionalExchange/"
+                "ComponentExchange/PhysicalLink creation requires backing "
+                "ports that this tool doesn't create or validate (note-0017). "
+                "Create these directly in the Capella desktop editor; "
+                "renaming/retagging *existing* exchanges/links via set: "
+                "name: remains reliable."
+            )
+
+
+def _normalize_pa_component_key(model, patch_data: list) -> None:
+    """Rewrite extend: components: -> extend: owned_components: for PA-phase
+    parents, but only when this model's PhysicalComponent class actually has
+    the owned_components/related_components split (note-0021).
+
+    Current capellambse deprecates PhysicalComponent.components as a
+    non-model-coupled computed property (related_components), moving the
+    real containment to owned_components -- extending 'components' directly
+    raises "not model-coupled" from capellambse's generic decl engine. But
+    older capellambse installs (still common among Siemens customers on
+    Capella 6.1-era tooling) predate that split: there, 'components' IS the
+    real, model-coupled containment, and rewriting it would break instead of
+    fix. Capella_Tools' own capellambse_yaml_manager.py already defends this
+    exact same way (`hasattr(type(obj), "related_components")`) -- mirrored
+    here so this tool supports both.
+    """
+    for item in patch_data:
+        if not isinstance(item, dict):
+            continue
+        parent_ref = item.get('parent')
+        if not isinstance(parent_ref, _UUIDRef):
+            continue
+        if _resolve_phase_for_uuid(model, parent_ref.value) != 'PA':
+            continue
+        extend = item.get('extend', {})
+        if not isinstance(extend, dict) or 'components' not in extend:
+            continue
+        try:
+            parent_obj = model.by_uuid(parent_ref.value)
+        except Exception:
+            continue
+        if not hasattr(type(parent_obj), 'related_components'):
+            continue  # older capellambse: components IS the real containment -- leave it
+        children = extend.pop('components')
+        extend.setdefault('owned_components', []).extend(children)
+
+
 def _enforce_component_types(model, patch_data: list) -> None:
     """Inject _type on component children where absent to prevent Part object creation."""
     for item in patch_data:
@@ -483,6 +563,8 @@ def _preprocess_patch(model, patch_yaml: str) -> str:
         return patch_yaml  # pass through; decl.apply() will surface the error
     if not isinstance(patch_data, list):
         return patch_yaml
+    _reject_unsupported_exchange_creation(patch_data)
+    _normalize_pa_component_key(model, patch_data)
     _enforce_function_types(model, patch_data)
     _enforce_component_types(model, patch_data)
     _enforce_pv_types(patch_data)
@@ -493,8 +575,8 @@ def apply_patch(session: dict, patch_yaml: str) -> dict:
     """Apply a declarative YAML patch to the model and save it to disk."""
     aird_path = Path(session['aird_path'])
     model = open_model(aird_path, resources=session.get('resources') or None)
-    processed_yaml = _preprocess_patch(model, patch_yaml)
     try:
+        processed_yaml = _preprocess_patch(model, patch_yaml)
         decl.apply(model, io.StringIO(processed_yaml))
     except Exception as exc:
         return {"status": "error", "message": str(exc)}
