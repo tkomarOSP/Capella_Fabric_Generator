@@ -108,9 +108,25 @@ def open_model(aird_path: Path, resources: dict | None = None) -> capellambse.Me
 # Phase → object-type collections
 # ---------------------------------------------------------------------------
 
+def _all_requirements(m: capellambse.MelodyModel):
+    """Model-wide Requirement search (note-0037).
+
+    BlockArchitecture.all_requirements (m.oa.all_requirements etc.) passes
+    below=<that layer> to model.search(), which restricts results to
+    elements nested inside that layer's own XML subtree. Teamcenter/SMW
+    import tooling drops each imported requirement's CapellaModule as an
+    ownedExtensions child of the SystemEngineering root itself -- above
+    all four architecture layers, not nested under any single one of them
+    (confirmed against a real exported model). So no per-layer
+    all_requirements property, for any layer, will ever see it. Searching
+    from the model root (no below=) removes that ancestor constraint.
+    """
+    return m.search("Requirement", subclasses=True)
+
+
 PHASE_COLLECTIONS: dict[str, dict[str, object]] = {
     "OA": {
-        "Requirement":      lambda m: m.oa.all_requirements,
+        "Requirement":      _all_requirements,
         "Entity":           lambda m: m.oa.all_entities,
         "Activity":         lambda m: m.oa.all_activities,
         "Capability":       lambda m: m.oa.all_capabilities,
@@ -119,7 +135,7 @@ PHASE_COLLECTIONS: dict[str, dict[str, object]] = {
         "Diagram":          lambda m: m.oa.diagrams,
     },
     "SA": {
-        "Requirement":       lambda m: m.oa.all_requirements,
+        "Requirement":       _all_requirements,
         "Component":         lambda m: m.sa.all_components,
         "Capability":        lambda m: m.sa.all_capabilities,
         "Function Exchange": lambda m: m.sa.all_function_exchanges,
@@ -129,7 +145,7 @@ PHASE_COLLECTIONS: dict[str, dict[str, object]] = {
         "Diagram":           lambda m: m.sa.diagrams,
     },
     "LA": {
-        "Requirement":        lambda m: m.oa.all_requirements,
+        "Requirement":        _all_requirements,
         "Capability":         lambda m: m.la.all_capabilities,
         "Component":          lambda m: m.la.all_components,
         "Function":           lambda m: m.la.all_functions,
@@ -140,7 +156,7 @@ PHASE_COLLECTIONS: dict[str, dict[str, object]] = {
         "Diagram":            lambda m: m.la.diagrams,
     },
     "PA": {
-        "Requirement":        lambda m: m.oa.all_requirements,
+        "Requirement":        _all_requirements,
         "Component":          lambda m: m.pa.all_components,
         "Function":           lambda m: m.pa.all_functions,
         "Functional Chain":   lambda m: m.pa.all_functional_chains,
