@@ -189,6 +189,38 @@ At the PA phase, always use `owned_components:`, not `components:` — `Physical
 
 `apply_model_patch` rejects `extend: exchanges:`, `component_exchanges:`, and `physical_links:` with a clear error rather than creating them — these all connect ports (`FunctionInputPort`/`FunctionOutputPort`, `PhysicalPort`) that this tool doesn't create or validate, and a malformed one is more work to find and remove than to draw correctly in the Capella desktop editor in the first place. Renaming/retagging *existing* exchanges or links via `set: name:` is unaffected and remains reliable.
 
+### Exchange Items, Exchange Item Elements, Classes, and Associations
+
+Browsable via `browse_model`/`search_model_objects` as object types `"Data Package"`, `"Class"`, `"Association"`, `"Exchange Item"`, and `"Exchange Item Element"` in any phase (searched model-wide regardless of which phase you pass — these data-modeling elements live under a `DataPkg`, not scoped to one architecture layer). `"Property"` (a Class member / Association end) is deliberately not independently browsable — discover it via its owning Class or Association, the same way ports aren't independently browsable either.
+
+Naming and describing any of these — including `FunctionalExchange` — works today via plain `set: name:`/`set: description:`, with no special handling needed. Creating the full chain works in one patch, verified end-to-end against a real model:
+
+```yaml
+- parent: !uuid <functional-exchange-uuid>
+  set:
+    description: Fault code telemetry from the outdoor unit.
+
+- parent: !uuid <datapkg-uuid>
+  extend:
+    exchange_items:
+      - promise_id: ei1
+        name: Fault Code
+        elements:
+          - name: code_value
+            type: !uuid <class-uuid>       # or !promise a Class created earlier in the same patch
+
+- parent: !uuid <functional-exchange-uuid>
+  extend:
+    exchanged_items:
+      - !promise ei1                        # allocates the ExchangeItem -- a reference, not nested creation
+```
+
+Creating a `Class` (`extend: classes:` under a `DataPkg`), a `Property` on it (`extend: owned_properties:` — despite `owned_properties` being a `Filter` over the real `Classifier.owned_features` containment, it works correctly and does not need the `owned_features:` workaround this might suggest by analogy to the PA-component gotcha above), and an `Association` connecting two classes (`extend: associations:` under a `DataPkg`, with nested `extend: members:` Property ends, each `type: !uuid <class-uuid>` or `!promise`) all work the same way, with no `_type` injection needed for any of them.
+
+**Not supported: creating a fresh `min_card`/`max_card` (Min/Max Cardinality) where none exists yet.** Both are `Single`-wrapped Containment references to a `NumericValue` object, and capellambse's generic `decl` engine can append into lists or mutate an *existing* sub-object's fields, but has no way to create a brand-new object into an empty `Single` container from a patch. Set Min/Max Card in the Capella desktop editor instead — same judgment call as exchanges/physical links above: a narrow, low-frequency operation not worth building custom decl-bypassing object-creation code for.
+
+`generate_fabric` renders the full chain with dedicated templates (not just the generic fallback): `Class` shows its properties (each resolved to its type) and superclass if any; `Property` shows its resolved type, cardinality, aggregation kind, and owning Association if any; `Association` shows its member ends with each end's connected class resolved inline; `ExchangeItemElement` additionally renders `kind`, `direction`, `is_composite`, `referenced_properties`, and Min/Max Card (previously missing entirely).
+
 ---
 
 ## Claude Integration — System Prompt

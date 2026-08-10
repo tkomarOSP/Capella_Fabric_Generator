@@ -124,6 +124,21 @@ def _all_requirements(m: capellambse.MelodyModel):
     return m.search("Requirement", subclasses=True)
 
 
+def _model_wide(class_name: str):
+    """Build a model-wide (unscoped) search lambda for a given class name.
+
+    Data-modeling elements (ExchangeItem, ExchangeItemElement, Class,
+    Association, DataPkg) live under whichever DataPkg they were authored
+    in -- not scoped to one architecture layer's XML subtree the way
+    per-layer accessors like m.oa.all_requirements assume. Registering
+    these under every phase via a per-layer-scoped search would repeat the
+    exact note-0037 bug (search rooted at the wrong ancestor misses content
+    rooted elsewhere) on day one. Search from the model root instead, same
+    fix pattern already proven for Requirement (_all_requirements above).
+    """
+    return lambda m: m.search(class_name, subclasses=True)
+
+
 PHASE_COLLECTIONS: dict[str, dict[str, object]] = {
     "OA": {
         "Requirement":      _all_requirements,
@@ -133,6 +148,11 @@ PHASE_COLLECTIONS: dict[str, dict[str, object]] = {
         "Entity Exchange":  lambda m: m.oa.all_entity_exchanges,
         "Process":          lambda m: m.oa.all_processes,
         "Diagram":          lambda m: m.oa.diagrams,
+        "Data Package":            _model_wide("DataPkg"),
+        "Class":                    _model_wide("Class"),
+        "Association":              _model_wide("Association"),
+        "Exchange Item":            _model_wide("ExchangeItem"),
+        "Exchange Item Element":    _model_wide("ExchangeItemElement"),
     },
     "SA": {
         "Requirement":       _all_requirements,
@@ -143,6 +163,11 @@ PHASE_COLLECTIONS: dict[str, dict[str, object]] = {
         "Mission":           lambda m: m.sa.all_missions,
         "Functional Chain":  lambda m: m.sa.all_functional_chains,
         "Diagram":           lambda m: m.sa.diagrams,
+        "Data Package":            _model_wide("DataPkg"),
+        "Class":                    _model_wide("Class"),
+        "Association":              _model_wide("Association"),
+        "Exchange Item":            _model_wide("ExchangeItem"),
+        "Exchange Item Element":    _model_wide("ExchangeItemElement"),
     },
     "LA": {
         "Requirement":        _all_requirements,
@@ -154,6 +179,11 @@ PHASE_COLLECTIONS: dict[str, dict[str, object]] = {
         "Interface":          lambda m: m.la.all_interfaces,
         "Component Exchange": lambda m: list(m.la.component_exchanges) + list(m.la.actor_exchanges),
         "Diagram":            lambda m: m.la.diagrams,
+        "Data Package":            _model_wide("DataPkg"),
+        "Class":                    _model_wide("Class"),
+        "Association":              _model_wide("Association"),
+        "Exchange Item":            _model_wide("ExchangeItem"),
+        "Exchange Item Element":    _model_wide("ExchangeItemElement"),
     },
     "PA": {
         "Requirement":        _all_requirements,
@@ -167,6 +197,11 @@ PHASE_COLLECTIONS: dict[str, dict[str, object]] = {
         "Physical Link":      lambda m: m.pa.all_physical_links,
         "Physical Path":      lambda m: m.pa.all_physical_paths,
         "Diagram":            lambda m: m.pa.diagrams,
+        "Data Package":            _model_wide("DataPkg"),
+        "Class":                    _model_wide("Class"),
+        "Association":              _model_wide("Association"),
+        "Exchange Item":            _model_wide("ExchangeItem"),
+        "Exchange Item Element":    _model_wide("ExchangeItemElement"),
     },
 }
 
