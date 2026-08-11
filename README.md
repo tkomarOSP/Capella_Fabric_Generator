@@ -25,6 +25,9 @@ Two complementary interfaces are provided:
 - Support for multi-library models (cross-reference dependency repos)
 - Quality scan: detect unnamed elements and unallocated functions
 - Session-based architecture — clean temp directories, no persistent model state on server
+- Data-modeling support: browse and create Classes, Associations, Exchange Items/Exchange Item Elements, and primitive Data Types — not just OA/SA/LA/PA structure
+- Diagram browsing is model-wide, including CDB (Class Diagram Blank / data) diagrams
+- New Properties/Exchange Item Elements get default Min/Max Cardinality auto-stamped, matching Capella Studio
 
 ---
 
@@ -66,7 +69,7 @@ Configure Claude Desktop (`~/.claude/claude_desktop_config.json`):
 {
   "mcpServers": {
     "capella-fabric": {
-      "url": "https://fabric.innovatingwithcapella.com/mcp"
+      "url": "https://mcp.innovatingwithcapella.com/mcp"
     }
   }
 }
