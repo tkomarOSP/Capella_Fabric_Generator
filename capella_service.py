@@ -154,6 +154,7 @@ PHASE_COLLECTIONS: dict[str, dict[str, object]] = {
         "Association":              _model_wide("Association"),
         "Exchange Item":            _model_wide("ExchangeItem"),
         "Exchange Item Element":    _model_wide("ExchangeItemElement"),
+        "Data Type":                _model_wide("DataType"),
     },
     "SA": {
         "Requirement":       _all_requirements,
@@ -169,6 +170,7 @@ PHASE_COLLECTIONS: dict[str, dict[str, object]] = {
         "Association":              _model_wide("Association"),
         "Exchange Item":            _model_wide("ExchangeItem"),
         "Exchange Item Element":    _model_wide("ExchangeItemElement"),
+        "Data Type":                _model_wide("DataType"),
     },
     "LA": {
         "Requirement":        _all_requirements,
@@ -185,6 +187,7 @@ PHASE_COLLECTIONS: dict[str, dict[str, object]] = {
         "Association":              _model_wide("Association"),
         "Exchange Item":            _model_wide("ExchangeItem"),
         "Exchange Item Element":    _model_wide("ExchangeItemElement"),
+        "Data Type":                _model_wide("DataType"),
     },
     "PA": {
         "Requirement":        _all_requirements,
@@ -203,6 +206,7 @@ PHASE_COLLECTIONS: dict[str, dict[str, object]] = {
         "Association":              _model_wide("Association"),
         "Exchange Item":            _model_wide("ExchangeItem"),
         "Exchange Item Element":    _model_wide("ExchangeItemElement"),
+        "Data Type":                _model_wide("DataType"),
     },
 }
 

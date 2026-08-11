@@ -191,7 +191,9 @@ At the PA phase, always use `owned_components:`, not `components:` — `Physical
 
 ### Exchange Items, Exchange Item Elements, Classes, and Associations
 
-Browsable via `browse_model`/`search_model_objects` as object types `"Data Package"`, `"Class"`, `"Association"`, `"Exchange Item"`, and `"Exchange Item Element"` in any phase (searched model-wide regardless of which phase you pass — these data-modeling elements live under a `DataPkg`, not scoped to one architecture layer). `"Property"` (a Class member / Association end) is deliberately not independently browsable — discover it via its owning Class or Association, the same way ports aren't independently browsable either.
+Browsable via `browse_model`/`search_model_objects` as object types `"Data Package"`, `"Class"`, `"Association"`, `"Exchange Item"`, `"Exchange Item Element"`, and `"Data Type"` in any phase (searched model-wide regardless of which phase you pass — these data-modeling elements live under a `DataPkg`, not scoped to one architecture layer). `"Property"` (a Class member / Association end) is deliberately not independently browsable — discover it via its owning Class or Association, the same way ports aren't independently browsable either.
+
+`"Data Type"` covers a model's primitive types (`Integer`, `Boolean`, `Float`, `String`, `Byte`, `Char`, etc. — usually living in a `Predefined Types` `DataPkg`), previously undiscoverable by any means other than manually finding the UUID in Capella Studio: `list_object_types()` had no datatype category, `browse_model(object_type="Data Type")` hard-errored, and `search_model_objects(object_type="Class", ...)` never matched them since primitive types are a different Capella metaclass entirely, not `Class` instances. Once resolved (by `!uuid` from a `Data Type` browse result), referencing one in a `Class` property's `type:` already worked fine — the gap was purely discovery, not application.
 
 Naming and describing any of these — including `FunctionalExchange` — works today via plain `set: name:`/`set: description:`, with no special handling needed. Creating the full chain works in one patch, verified end-to-end against a real model:
 
