@@ -33,8 +33,10 @@ cd /opt/capella_fabric_generator
 Clone directly from GitHub:
 
 ```bash
-git clone -b feature/capella-7.0.1-support https://github.com/tkSDISW/Capella_Tools /opt/capella_tools
+git clone https://github.com/tkSDISW/Capella_Tools /opt/capella_tools
 ```
+
+Clones `master` by default — `feature/capella-7.0.1-support` (an older branch this used to pin to) has since been merged into `master`, which now also carries the data-modeling rendering support (Class/Property/Association, Exchange Item Element cardinality fields) added 2026-08-11. If an existing deployment's `/opt/capella_tools` is still on that feature branch, switch it: `cd /opt/capella_tools && git checkout master && git pull`.
 
 ---
 
@@ -224,7 +226,7 @@ To adjust the TTL, edit `MAXAGE_HOURS` in `deploy/cleanup_sessions.sh`.
 1. Go to **claude.ai → Settings → Customize → Connectors**
 2. Click **Add connector**
 3. Enter the URL: `https://mcp.innovatingwithcapella.com/mcp`
-4. Click **Refresh tool list** — you should see 8 tools
+4. Click **Refresh tool list** — you should see 11 tools
 
 **Tools available:**
 
@@ -237,9 +239,12 @@ To adjust the TTL, edit `MAXAGE_HOURS` in `deploy/cleanup_sessions.sh`.
 | `search_model_objects` | Search objects by name (substring match) |
 | `resolve_model_uuids` | Resolve UUIDs to model objects |
 | `generate_fabric` | Generate YAML fabric for resolved UUIDs |
+| `apply_model_patch` | Apply a declarative YAML patch, save, and git-commit |
+| `verify_model` | Scan a phase for quality issues (missing names, unallocated functions) |
+| `push_model_changes` | Push committed changes back to the remote GitHub repository |
 | `cleanup_session` | Delete cloned repos and temp files |
 
-**Typical workflow:**
+**Typical read workflow:**
 
 ```
 1. clone_capella_repo(repo_url, github_pat, branch?)
@@ -250,6 +255,19 @@ To adjust the TTL, edit `MAXAGE_HOURS` in `deploy/cleanup_sessions.sh`.
 6. generate_fabric(session_id)                                          ← produce YAML
 7. cleanup_session(session_id)                                          ← release disk space
 ```
+
+**Typical write workflow:**
+
+```
+1. clone_capella_repo(repo_url, github_pat, branch?)
+2. browse_model / search_model_objects                                  ← confirm target UUID(s)
+3. apply_model_patch(session_id, patch_yaml, commit_message)           ← apply, save, commit
+4. verify_model(session_id, phase)                                      ← scan for quality issues
+5. push_model_changes(session_id)                                       ← push to GitHub
+6. cleanup_session(session_id)                                          ← release disk space
+```
+
+See the main [README.md](../README.md#patch-yaml-conventions) for `apply_model_patch`'s full YAML conventions (auto-injected `_type`, data-modeling support, cardinality defaults, and what's not supported).
 
 ---
 
@@ -269,8 +287,12 @@ tail -f /var/log/capella-fabric/session-cleanup.log
 ```bash
 cd /opt/capella_fabric_generator
 git pull
+cd /opt/capella_tools
+git pull
 systemctl restart capella-mcp
 ```
+
+`Capella_Tools` holds the `generate_fabric` rendering logic (`capellambse_yaml_manager.py`) — a fix landing only in `Capella_Fabric_Generator` (e.g. `capella_service.py`, `mcp_server.py`) doesn't need the second `git pull`, but many fixes span both repos, so pulling both by default is safer than checking which repo actually changed each time.
 
 If `nginx_mcp.conf` changed, also copy it and reload nginx:
 
