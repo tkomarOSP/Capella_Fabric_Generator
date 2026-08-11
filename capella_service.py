@@ -23,6 +23,7 @@ if str(_CAPELLA_TOOLS) not in sys.path:
 import yaml
 import capellambse
 from capellambse import decl
+from capellambse import model as capellambse_model
 from capella_tools.capellambse_yaml_manager import CapellaYAMLHandler
 
 # ---------------------------------------------------------------------------
@@ -590,20 +591,82 @@ def _enforce_pv_types(patch_data: list) -> None:
                         pv['_type'] = t
 
 
-def _preprocess_patch(model, patch_yaml: str) -> str:
-    """Parse patch YAML, enforce ARCADIA type conventions, re-serialize."""
+_PROPERTY_CARDINALITY_ATTRS = frozenset({'properties', 'owned_properties', 'owned_features'})
+
+
+def _default_cardinality_promises(patch_data: list) -> list[str]:
+    """Ensure new Property/ExchangeItemElement children get a promise_id so
+    their default min_card/max_card (note-0044 item 1, cousin_back_log) can
+    be stamped after decl.apply() creates them.
+
+    Capella Studio defaults a new property's/exchange-item-element's Min/Max
+    Card to 1/1; apply_model_patch previously left it unset entirely.
+    Confirmed empirically: neither decl.py's YAML engine nor a plain scalar/
+    dict assignment can create a fresh min_card/max_card -- both are
+    Single-wrapped Containment references to a whole LiteralNumericValue
+    object, and every generic-engine path only knows how to append into
+    lists or mutate an *existing* sub-object, never create a new one into
+    an empty Single slot. The only way found: after the real object exists,
+    assign capellambse.model.NewObject('LiteralNumericValue', value='1')
+    directly via Python (bypassing decl.py entirely for this one step).
+    That requires a real object reference, which doesn't exist until
+    decl.apply() runs -- so this pass only ensures every such child has a
+    promise_id (generating one if absent), and apply_patch resolves those
+    promises against decl.apply()'s own return value afterward to do the
+    actual stamping. Skips any child that already specifies its own
+    min_card/max_card -- explicit intent in the patch is never overridden.
+    """
+    promise_ids: list[str] = []
+
+    def _ensure_promise(child: dict) -> None:
+        if 'min_card' in child or 'max_card' in child:
+            return
+        promise_id = child.get('promise_id')
+        if not promise_id:
+            promise_id = f"_card_{uuid.uuid4().hex}"
+            child['promise_id'] = promise_id
+        promise_ids.append(promise_id)
+
+    for item in patch_data:
+        if not isinstance(item, dict):
+            continue
+        extend = item.get('extend', {})
+        if not isinstance(extend, dict):
+            continue
+        for attr in _PROPERTY_CARDINALITY_ATTRS | {'elements'}:
+            for child in extend.get(attr, []):
+                if isinstance(child, dict):
+                    _ensure_promise(child)
+        for ei in extend.get('exchange_items', []):
+            if not isinstance(ei, dict):
+                continue
+            for child in ei.get('elements', []):
+                if isinstance(child, dict):
+                    _ensure_promise(child)
+
+    return promise_ids
+
+
+def _preprocess_patch(model, patch_yaml: str) -> tuple[str, list[str]]:
+    """Parse patch YAML, enforce ARCADIA type conventions, re-serialize.
+
+    Returns the processed YAML plus any promise_ids needing a default
+    min_card/max_card stamped after decl.apply() runs (note-0044).
+    """
     try:
         patch_data = yaml.load(patch_yaml, Loader=_PatchLoader)
     except yaml.YAMLError:
-        return patch_yaml  # pass through; decl.apply() will surface the error
+        return patch_yaml, []  # pass through; decl.apply() will surface the error
     if not isinstance(patch_data, list):
-        return patch_yaml
+        return patch_yaml, []
     _reject_unsupported_exchange_creation(patch_data)
     _normalize_pa_component_key(model, patch_data)
     _enforce_function_types(model, patch_data)
     _enforce_component_types(model, patch_data)
     _enforce_pv_types(patch_data)
-    return yaml.dump(patch_data, Dumper=_PatchDumper, default_flow_style=False, allow_unicode=True)
+    cardinality_promise_ids = _default_cardinality_promises(patch_data)
+    processed = yaml.dump(patch_data, Dumper=_PatchDumper, default_flow_style=False, allow_unicode=True)
+    return processed, cardinality_promise_ids
 
 
 def apply_patch(session: dict, patch_yaml: str) -> dict:
@@ -611,8 +674,16 @@ def apply_patch(session: dict, patch_yaml: str) -> dict:
     aird_path = Path(session['aird_path'])
     model = open_model(aird_path, resources=session.get('resources') or None)
     try:
-        processed_yaml = _preprocess_patch(model, patch_yaml)
-        decl.apply(model, io.StringIO(processed_yaml))
+        processed_yaml, cardinality_promise_ids = _preprocess_patch(model, patch_yaml)
+        promises = decl.apply(model, io.StringIO(processed_yaml))
+        for pid in cardinality_promise_ids:
+            obj = promises.get(decl.Promise(pid))
+            if obj is None:
+                continue
+            if getattr(obj, 'min_card', 'n/a') is None:
+                obj.min_card = capellambse_model.NewObject('LiteralNumericValue', value='1')
+            if getattr(obj, 'max_card', 'n/a') is None:
+                obj.max_card = capellambse_model.NewObject('LiteralNumericValue', value='1')
     except Exception as exc:
         return {"status": "error", "message": str(exc)}
     model.save()
