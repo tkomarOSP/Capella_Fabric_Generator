@@ -195,6 +195,10 @@ Browsable via `browse_model`/`search_model_objects` as object types `"Data Packa
 
 `"Data Type"` covers a model's primitive types (`Integer`, `Boolean`, `Float`, `String`, `Byte`, `Char`, etc. — usually living in a `Predefined Types` `DataPkg`), previously undiscoverable by any means other than manually finding the UUID in Capella Studio: `list_object_types()` had no datatype category, `browse_model(object_type="Data Type")` hard-errored, and `search_model_objects(object_type="Class", ...)` never matched them since primitive types are a different Capella metaclass entirely, not `Class` instances. Once resolved (by `!uuid` from a `Data Type` browse result), referencing one in a `Class` property's `type:` already worked fine — the gap was purely discovery, not application.
 
+### `"Diagram"` browsing is model-wide, not layer-scoped
+
+`browse_model(object_type="Diagram", phase=<any>)` returns every diagram in the model regardless of which phase you pass — including CDB (Class Diagram Blank / data) diagrams, which previously never appeared from *any* phase. Root cause: capellambse's per-layer `diagrams` accessors (`m.oa.diagrams`/`m.sa.diagrams`/etc.) look layer-scoped but actually just filter by a fixed **viewpoint** string ("Operational Analysis"/"System Analysis"/"Logical Architecture"/"Physical Architecture") baked into each accessor — CDB diagrams have viewpoint `"Common"`, matching none of the four, so they were invisible everywhere, not excluded by phase. Fixed by constructing an unscoped `DiagramAccessor(viewpoint=None)` directly instead of going through any single layer's fixed-viewpoint accessor.
+
 Naming and describing any of these — including `FunctionalExchange` — works today via plain `set: name:`/`set: description:`, with no special handling needed. Creating the full chain works in one patch, verified end-to-end against a real model:
 
 ```yaml

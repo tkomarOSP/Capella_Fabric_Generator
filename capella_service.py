@@ -125,6 +125,28 @@ def _all_requirements(m: capellambse.MelodyModel):
     return m.search("Requirement", subclasses=True)
 
 
+def _all_diagrams(m: capellambse.MelodyModel):
+    """Model-wide Diagram search, unscoped by viewpoint (note-0044 item 4).
+
+    m.oa.diagrams/m.sa.diagrams/m.la.diagrams/m.pa.diagrams each construct
+    their own capellambse.model.DiagramAccessor with a *fixed viewpoint*
+    ("Operational Analysis"/"System Analysis"/"Logical Architecture"/
+    "Physical Architecture" respectively) baked into the accessor
+    definition -- despite superficially looking like layer-scoped
+    containment traversal, the accessor's __get__ actually just calls
+    aird.enumerate_descriptors(loader, viewpoint=<that fixed string>)
+    every time, filtering by viewpoint alone. CDB (Class Diagram Blank /
+    data) diagrams have viewpoint "Common" -- confirmed directly against a
+    real model containing two -- which matches none of the four layer
+    viewpoints, so they're invisible from every single phase, not just one.
+    Constructing a fresh DiagramAccessor with viewpoint=None removes that
+    filter entirely and returns every diagram in the model regardless of
+    viewpoint (same fix shape as _all_requirements/_model_wide above:
+    don't let a structural scoping assumption hide real content).
+    """
+    return capellambse_model.DiagramAccessor(viewpoint=None).__get__(m)
+
+
 def _model_wide(class_name: str):
     """Build a model-wide (unscoped) search lambda for a given class name.
 
@@ -148,7 +170,7 @@ PHASE_COLLECTIONS: dict[str, dict[str, object]] = {
         "Capability":       lambda m: m.oa.all_capabilities,
         "Entity Exchange":  lambda m: m.oa.all_entity_exchanges,
         "Process":          lambda m: m.oa.all_processes,
-        "Diagram":          lambda m: m.oa.diagrams,
+        "Diagram":          _all_diagrams,
         "Data Package":            _model_wide("DataPkg"),
         "Class":                    _model_wide("Class"),
         "Association":              _model_wide("Association"),
@@ -164,7 +186,7 @@ PHASE_COLLECTIONS: dict[str, dict[str, object]] = {
         "Function":          lambda m: m.sa.all_functions,
         "Mission":           lambda m: m.sa.all_missions,
         "Functional Chain":  lambda m: m.sa.all_functional_chains,
-        "Diagram":           lambda m: m.sa.diagrams,
+        "Diagram":           _all_diagrams,
         "Data Package":            _model_wide("DataPkg"),
         "Class":                    _model_wide("Class"),
         "Association":              _model_wide("Association"),
@@ -181,7 +203,7 @@ PHASE_COLLECTIONS: dict[str, dict[str, object]] = {
         "Functional Chain":   lambda m: m.la.all_functional_chains,
         "Interface":          lambda m: m.la.all_interfaces,
         "Component Exchange": lambda m: list(m.la.component_exchanges) + list(m.la.actor_exchanges),
-        "Diagram":            lambda m: m.la.diagrams,
+        "Diagram":            _all_diagrams,
         "Data Package":            _model_wide("DataPkg"),
         "Class":                    _model_wide("Class"),
         "Association":              _model_wide("Association"),
@@ -200,7 +222,7 @@ PHASE_COLLECTIONS: dict[str, dict[str, object]] = {
         "Physical Exchange":  lambda m: m.pa.all_physical_exchanges,
         "Physical Link":      lambda m: m.pa.all_physical_links,
         "Physical Path":      lambda m: m.pa.all_physical_paths,
-        "Diagram":            lambda m: m.pa.diagrams,
+        "Diagram":            _all_diagrams,
         "Data Package":            _model_wide("DataPkg"),
         "Class":                    _model_wide("Class"),
         "Association":              _model_wide("Association"),
