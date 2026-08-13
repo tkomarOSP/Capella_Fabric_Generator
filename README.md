@@ -37,7 +37,7 @@ Two complementary interfaces are provided:
 
 - Python 3.11+
 - [Capella_Tools](https://github.com/tkSDISW/Capella_Tools) checked out alongside this repo (or set `CAPELLA_TOOLS_PATH`)
-- A Capella model in a GitHub repository (for MCP use) or as a `.zip` archive (for web use)
+- A Capella model in a GitHub repository (for MCP use) or as a `.zip` archive (for web use) — see [capella_fabric_generator_model](https://github.com/tkomarOSP/capella_fabric_generator_model) for a Capella 7.0.1 example model
 
 ```bash
 git clone https://github.com/tkomarOSP/Capella_Fabric_Generator
