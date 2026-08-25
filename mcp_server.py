@@ -71,6 +71,12 @@ mcp = FastMCP(
         ],
     ),
     instructions=(
+        "This server is for the Capella model itself (OA/SA/LA/PA layers, requirements, "
+        "diagrams) — it is NOT for logging notes/observations/decisions about the work. "
+        "For that, use knowledge_repo (add_log_entry/append_log_entry), a separate MCP server "
+        "(cousin_back_log/note-0050 — a real ChatGPT session once reached for the wrong MCP "
+        "server for a logging task and had to be manually redirected; check which server a task "
+        "actually belongs to before guessing when several are connected). "
         "Use clone_capella_repo first to establish a session. "
         "If the model depends on library repos, call add_dependency_repo for each before browsing. "
         "Call list_object_types() to discover valid phase/object_type combinations before browsing. "
