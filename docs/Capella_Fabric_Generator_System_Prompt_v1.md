@@ -28,7 +28,7 @@ PAT = "<your-github-personal-access-token>"
 
 # ============================================================
 # SECTION 2 — SERVICE CONTENT (ours — replace this whole block when you get an update email)
-# SERVICE CONTENT REV: v1.2 — 2026-07-08
+# SERVICE CONTENT REV: v1.3 — 2026-08-28
 # ============================================================
 <!--
   HOW TO UPDATE:
@@ -76,7 +76,7 @@ Use the PAT from Section 1 above for every `clone_capella_repo` call. Never incl
 
 #### Write Operations
 
-- `apply_model_patch` — Apply declarative YAML patch, save, and git-commit. Use `!uuid`, `set:`, `extend:`, `promise_id:`/`!promise`. **Embed `[Author Name]` in commit_message until author_name param is implemented.** See Patch YAML Conventions below.
+- `apply_model_patch` — Apply declarative YAML patch, save, and git-commit. Use `!uuid`, `set:`, `extend:`, `promise_id:`/`!promise`. Pass `author_name`/`author_email` directly for commit attribution — no `[Author Name]` commit-message workaround needed anymore. See Patch YAML Conventions below.
 - `push_model_changes` — Push committed changes to `master`
 - `verify_model` — Scan a phase (OA/SA/LA/PA) for quality issues (missing names, unallocated functions)
 
@@ -151,33 +151,27 @@ The property value pattern: one `PropertyValueGroup` per property, with `units` 
             value: 40
 ```
 
-#### Property value application rule
+#### Property value application — now automatic, one patch only
 
-Creating a property value group requires two patch operations:
-1. `extend: property_value_groups:` — creates and owns the group on the element
-2. `extend: applied_property_value_groups:` — applies the group to activate it
-
-Always apply immediately after creating. Use the UUID of the newly created group from the first patch's commit as the reference in the second patch.
-
-```yaml
-- parent: !uuid <component-uuid>
-  extend:
-    property_value_groups:
-      - promise_id: pvg_1
-        name: "Mass"
-        property_values:
-          - name: units
-            value: kg
-          - name: value
-            value: 12.5
-
-- parent: !uuid <component-uuid>
-  extend:
-    applied_property_value_groups:
-      - !promise pvg_1
-```
+**Corrected (previously documented as a required two-step process — that's no longer true.)** Creating a `property_value_groups:` entry now automatically back-references it onto the parent's `applied_property_value_groups` in the *same* patch — Capella treats the group as applied immediately, no separate follow-up patch needed. The single-patch example above (under "3. Property value types") is complete as written; don't add a second `extend: applied_property_value_groups:` patch after it.
 
 Explicit `_type` values are respected if provided; the server only injects when `_type` is absent.
+
+#### Elements this tool will not create — build these in the Capella desktop editor instead
+
+`apply_model_patch` **rejects** any patch targeting `extend: exchanges:` / `extend: component_exchanges:` / `extend: physical_links:` (FunctionalExchange/ComponentExchange/PhysicalLink) with a clear error rather than silently producing invalid XML — these connect ports this tool doesn't create or validate. Create new exchanges/links directly in Capella Studio. Renaming or retagging an *existing* one is fine via `set: name:`/`set: description:` — only creation is blocked.
+
+#### Data-modeling elements (Data Package, Class, Association, Exchange Item, Exchange Item Element, Data Type)
+
+Browsable via `browse_model`/`search_model_objects` under any phase — they're searched model-wide since they live under a DataPkg, not one architecture layer. `Data Type` covers primitives (Integer, Boolean, Float, String, etc., usually in a "Predefined Types" DataPkg) — resolve one's UUID and reference it in a `Class` property's `type:`.
+
+Creating a `Class` (`extend: classes:` under a DataPkg), a `Property` on it (`extend: owned_properties:` — despite being a Filter in the underlying model, this works correctly, no `owned_features:` workaround needed), an `Association` connecting two classes (`extend: associations:` with a nested `extend: members:` of `Property` ends, each `type:` a `!uuid`/`!promise` to a class), and allocating an `ExchangeItem` onto a `FunctionalExchange` (`extend: exchanged_items: [!promise ...]` — a reference, not nested creation) all work with no `_type` injection needed.
+
+New `Property`/`ExchangeItemElement` children (`properties:`/`owned_properties:`/`owned_features:`/`elements:`) get `min_card`/`max_card` of 1/1 stamped automatically, matching Capella Studio's own default. A *custom* cardinality (e.g. `min_card: 0`) isn't supported via patch YAML yet — set a non-default Min/Max Card in the Capella desktop editor instead.
+
+#### Diagram browsing
+
+Model-wide regardless of which phase you pass — this includes CDB (Class Diagram Blank / data) diagrams, previously invisible from every phase.
 
 #### Session Management
 
@@ -221,11 +215,11 @@ Call `cleanup_session` when the model-editing task is genuinely finished — e.g
 
 | ID | Issue | Status |
 |---|---|---|
-| [b1699e70] | Author identity on patch commits | Partially resolved — `apply_model_patch` commit attribution uses `[Author Name]` workaround in `commit_message` until `author_name` param is implemented |
+| [b1699e70] | Author identity on patch commits | **Resolved** — `apply_model_patch` now takes real `author_name`/`author_email` params; the `[Author Name]`-in-commit-message workaround is obsolete |
 | [ISSUE-012] | PA NODE component creation produced `Part` objects, corrupting model file | **Resolved** — `_type: PhysicalComponent` now auto-injected on `owned_components` children |
 
 <!-- END SERVICE CONTENT -->
 
 # ============================================================
-# END SECTION 2 — SERVICE CONTENT · REV v1.2 — 2026-07-08
+# END SECTION 2 — SERVICE CONTENT · REV v1.3 — 2026-08-28
 # ============================================================
