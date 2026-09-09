@@ -293,7 +293,7 @@ git clone https://github.com/tkSDISW/Capella_Tools /opt/capella_tools
 cd /opt/capella_fabric_generator
 python3.11 -m venv .venv
 .venv/bin/pip install -r requirements.txt
-.venv/bin/pip install -e /opt/se-knowledge-partner/kp/auth   # the optional piece
+.venv/bin/pip install -e /opt/knowledge_partner/kp/auth   # the optional piece
 ```
 
 `kp-auth` installs as a bare top-level `auth` package, not `kp.auth`. Harmless
@@ -308,7 +308,7 @@ working unchanged). On the Cartenza droplet, create it:
 
 ```bash
 cat > /etc/capella-mcp.env <<'EOF'
-CARTENZA_DB_PATH=/opt/cartenza/data/cartenza.db
+CARTENZA_DB_PATH=/var/lib/cartenza/cartenza.db
 CARTENZA_CONNECT_SECRET_KEY=<same value kp-connect uses>
 KP_CONNECT_BASE_URL=https://dev.connect.cartenza.ai
 EOF
