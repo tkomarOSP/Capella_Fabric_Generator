@@ -226,12 +226,13 @@ To adjust the TTL, edit `MAXAGE_HOURS` in `deploy/cleanup_sessions.sh`.
 1. Go to **claude.ai → Settings → Customize → Connectors**
 2. Click **Add connector**
 3. Enter the URL: `https://mcp.innovatingwithcapella.com/mcp`
-4. Click **Refresh tool list** — you should see 11 tools
+4. Click **Refresh tool list** — you should see 12 tools
 
 **Tools available:**
 
 | Tool | Purpose |
 |---|---|
+| `begin_connect` | Start a credential-free connect (Cartenza co-deploy only — see below) |
 | `clone_capella_repo` | Clone a GitHub repo containing a Capella model |
 | `add_dependency_repo` | Register a library repo the main model depends on |
 | `list_object_types` | Discover valid phase/object_type combinations |
@@ -268,6 +269,84 @@ To adjust the TTL, edit `MAXAGE_HOURS` in `deploy/cleanup_sessions.sh`.
 ```
 
 See the main [README.md](../README.md#patch-yaml-conventions) for `apply_model_patch`'s full YAML conventions (auto-injected `_type`, data-modeling support, cardinality defaults, and what's not supported).
+
+---
+
+## Co-deploying the MCP server on the Cartenza droplet (optional)
+
+Everything above deploys the MCP server **standalone**: `github_pat` is passed
+directly on every call and there is no database. That is the supported default
+and nothing below is required for it.
+
+The optional variant co-locates *only the MCP server* (not the Flask web app)
+on the Cartenza droplet, where `kp-auth` is installed. That turns on the
+credential-free path from `cousin_back_log/note-0086`: `begin_connect` returns a
+plain non-secret URL, the human authorizes in a browser, and
+`clone_capella_repo(connect_code=...)` clones with no PAT in any tool argument.
+`kp-auth` is an optional import — the same commit runs both ways.
+
+### C1. Install alongside the Cartenza services
+
+```bash
+git clone https://github.com/tkomarOSP/Capella_Fabric_Generator /opt/capella_fabric_generator
+git clone https://github.com/tkSDISW/Capella_Tools /opt/capella_tools
+cd /opt/capella_fabric_generator
+python3.11 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+.venv/bin/pip install -e /opt/se-knowledge-partner/kp/auth   # the optional piece
+```
+
+`kp-auth` installs as a bare top-level `auth` package, not `kp.auth`. Harmless
+here — nothing else in this repo claims that name — but it is why the imports
+in `mcp_server.py` read `from auth.connect import ...`.
+
+### C2. Environment file
+
+`deploy/capella-mcp.service` reads `EnvironmentFile=-/etc/capella-mcp.env`
+(the `-` makes it optional, which is what keeps the standalone deployment
+working unchanged). On the Cartenza droplet, create it:
+
+```bash
+cat > /etc/capella-mcp.env <<'EOF'
+CARTENZA_DB_PATH=/opt/cartenza/data/cartenza.db
+CARTENZA_CONNECT_SECRET_KEY=<same value kp-connect uses>
+KP_CONNECT_BASE_URL=https://dev.connect.cartenza.ai
+EOF
+chmod 600 /etc/capella-mcp.env
+chown www-data:www-data /etc/capella-mcp.env
+```
+
+**`CARTENZA_CONNECT_SECRET_KEY` must match kp-connect's byte for byte.** A
+mismatch does not fail at startup — it fails much later, when a connect code is
+finally redeemed, as an undecryptable credential. This exact class of
+cross-service secret drift has bitten this project repeatedly; copy the value
+from the running kp-connect unit rather than generating a new one.
+
+`www-data` also needs read/write on `CARTENZA_DB_PATH` and its directory (SQLite
+writes a `-wal`/`-shm` sibling next to the file).
+
+### C3. nginx and DNS
+
+Use `deploy/nginx_mcp_cartenza.conf` instead of `nginx_mcp.conf`, add a DNS A
+record for `dev.capella.cartenza.ai` pointing at the Cartenza droplet, then
+`certbot --nginx -d dev.capella.cartenza.ai`.
+
+`mcp_server.py`'s `allowed_hosts` already lists `capella.cartenza.ai` and
+`dev.capella.cartenza.ai`. Any hostname *not* in that list returns 421 on every
+request no matter what nginx says — it's a source-code list, not config.
+
+### C4. Register the model repo on the Cartenza side
+
+`AgentScope` is repo-agnostic, so a Capella model repo is an ordinary Cartenza
+repo. On the Cartenza site: add it at `/onboarding/repos`, then scope it to an
+agent at `/onboarding/agents`. `begin_connect` refuses anything outside that
+registered scope, which is what makes the URL it hands back safe to print.
+
+Prefer **Connect with GitHub** over pasting a PAT on the connect page: one
+GitHub authorization also covers the model's library repos, so
+`add_dependency_repo` then needs no credential of its own. A pasted PAT is a
+single-use snapshot, cleared when the code is consumed, so each dependency
+would need its own connect code.
 
 ---
 

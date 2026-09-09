@@ -35,6 +35,42 @@ from mcp.server.transport_security import TransportSecuritySettings
 import capella_service as svc
 import git_service as git_svc
 
+# ---------------------------------------------------------------------------
+# Optional Cartenza integration (cousin_back_log/note-0086)
+#
+# A well-behaved agent's safety layer refuses to pass a raw PAT as a tool-call
+# argument -- correctly, and by design. That made clone_capella_repo
+# uncallable by an agent even when its own registered scope granted access to
+# the repo. knowledge-repo solved this once already with begin_connect: the
+# agent hands the human a plain, non-secret URL, the human authorizes in a
+# browser, and the agent redeems a code that never carries the secret itself.
+#
+# kp-auth is an OPTIONAL dependency and stays that way. Installed (Cartenza
+# deployment): the credential-free path lights up. Absent (anyone running this
+# server standalone): every tool below behaves exactly as it always has, with
+# github_pat passed directly. Same binary, no fork.
+# ---------------------------------------------------------------------------
+try:
+    from auth.connect import (  # type: ignore
+        mint_connect_code,
+        redeem_connect_code,
+        consume_connect_code,
+        resolve_oauth_credential,
+    )
+    _AUTH_AVAILABLE = True
+except ImportError:
+    _AUTH_AVAILABLE = False
+
+_CONNECT_BASE_URL = os.environ.get('KP_CONNECT_BASE_URL', '').rstrip('/')
+# Tags codes minted here so they can't be redeemed by kp-knowledge-repo, which
+# shares the same connect_codes table once co-deployed.
+_CONNECT_AUDIENCE = 'capella'
+
+_NO_AUTH_MSG = (
+    "Credential-free connect isn't configured on this server — pass github_pat "
+    "directly instead."
+)
+
 
 def _find_aird_in(directory: Path) -> Path | None:
     """Return the first .aird file found recursively under directory, or None."""
@@ -65,6 +101,12 @@ mcp = FastMCP(
         enable_dns_rebinding_protection=True,
         allowed_hosts=[
             "mcp.innovatingwithcapella.com",
+            # Cartenza co-deploy (note-0086): the same binary served from the
+            # Cartenza droplet, where kp-auth is installed and the
+            # credential-free connect path is live. A hostname missing from
+            # this list 421s every request -- it is not a config-file setting.
+            "capella.cartenza.ai",
+            "dev.capella.cartenza.ai",
             "127.0.0.1:*",
             "localhost:*",
             "[::1]:*",
@@ -78,6 +120,15 @@ mcp = FastMCP(
         "server for a logging task and had to be manually redirected; check which server a task "
         "actually belongs to before guessing when several are connected). "
         "Use clone_capella_repo first to establish a session. "
+        "If your own safety layer blocks credential-shaped tool-call arguments (a raw "
+        "github_pat value), don't try to disguise or reformat them — use "
+        "begin_connect(agent_id, repo_url, branch) instead: it returns a plain, non-secret URL "
+        "for the human to open in a browser and authorize there, then call "
+        "clone_capella_repo(connect_code=...) with no github_pat/repo_url/branch needed "
+        "(cousin_back_log/NOTE-0062, note-0086). Requires a registered agent first, at "
+        "/onboarding/agents on the Cartenza site. On that connect page, 'Connect with GitHub' "
+        "is better than pasting a PAT: one GitHub authorization also covers the model's library "
+        "repos, so add_dependency_repo then needs no credential at all. "
         "If the model depends on library repos, call add_dependency_repo for each before browsing. "
         "Call list_object_types() to discover valid phase/object_type combinations before browsing. "
         "Then browse or resolve UUIDs, then generate_fabric to get the YAML content. "
@@ -147,26 +198,106 @@ mcp = FastMCP(
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
+def begin_connect(agent_id: str, repo_url: str, branch: str = "main") -> dict:
+    """Start a credential-free connect — the alternative to passing github_pat.
+
+    For clients whose safety layer blocks credential-shaped tool-call arguments.
+    Never pass a PAT or api_key to this tool, or any tool — that's the whole
+    point. Checks the request against the given agent's *registered* scope
+    (register one at /onboarding/agents) before issuing anything; an
+    out-of-scope repo/branch is rejected here, not silently allowed.
+
+    Returns a one-time link. Show it to the human as a plain URL — it's not a
+    secret, safe to print verbatim. They open it in a browser (out of your own
+    tool-call channel entirely) and authorize there. Once they've done that,
+    call clone_capella_repo(connect_code=<code>) — no github_pat, repo_url or
+    branch needed, they're resolved from the code.
+
+    Prefer "Connect with GitHub" on that page over pasting a PAT: a GitHub
+    authorization covers the model repo AND its library repos, so
+    add_dependency_repo then needs no further credential. A pasted PAT is a
+    single-use snapshot and each dependency would need its own connect code.
+
+    Args:
+        agent_id: A registered agent's id (from /onboarding/agents).
+        repo_url: HTTPS URL of the Capella model repo to connect.
+        branch: Branch to connect (default: main).
+    """
+    if not _AUTH_AVAILABLE:
+        return {"error": _NO_AUTH_MSG}
+    if not _CONNECT_BASE_URL:
+        return {"error": "KP_CONNECT_BASE_URL env var not set"}
+
+    minted = mint_connect_code(
+        agent_id=agent_id, remote_url=repo_url, branch=branch,
+        audience=_CONNECT_AUDIENCE,
+    )
+    if "error" in minted:
+        return minted
+
+    return {
+        "connect_url": f"{_CONNECT_BASE_URL}/connect?code={minted['code']}",
+        "expires_in_minutes": minted["expires_in_minutes"],
+        "message": "Show this URL to the user — it's not a secret. They open it in a browser to "
+                   "authorize; you never see their credential. Once they've done that, call "
+                   "clone_capella_repo(connect_code=...).",
+    }
+
+
+@mcp.tool()
 def clone_capella_repo(
-    repo_url: str,
-    github_pat: str,
+    repo_url: str = "",
+    github_pat: str = "",
     branch: str = "",
     include_realized: bool = False,
     include_realizing: bool = False,
+    connect_code: str = "",
 ) -> dict:
     """Clone a GitHub repository containing a Capella model.
 
     Returns a session_id used by all subsequent tools.
     If the model depends on library repos, call add_dependency_repo next.
 
+    Two ways to authenticate — use whichever fits your client:
+    - **`github_pat` directly** — fine for clients that can safely pass a PAT
+      as a tool-call argument (e.g. Claude Code, with the PAT sourced from an
+      environment variable, never authored by the model).
+    - **`connect_code`** (from `begin_connect`) — for clients whose safety
+      layer blocks credential-shaped tool-call arguments. No `github_pat`/
+      `repo_url`/`branch` needed in that case; they're resolved server-side
+      from the code, which a human already authorized in a browser. The model
+      never sees the actual credential.
+
     Args:
         repo_url: HTTPS URL of the GitHub repository
-                  (e.g. https://github.com/owner/repo or https://github.com/owner/repo.git)
-        github_pat: GitHub personal access token with repo read access
-        branch: Git branch to clone (default: repo's default branch)
+                  (e.g. https://github.com/owner/repo or https://github.com/owner/repo.git).
+                  Omit when using connect_code.
+        github_pat: GitHub personal access token with repo read access.
+                    Omit when using connect_code.
+        branch: Git branch to clone (default: repo's default branch).
+                Omit when using connect_code — the branch is whatever
+                begin_connect scoped this code to.
         include_realized: Include realized references in the generated fabric
         include_realizing: Include realizing references in the generated fabric
+        connect_code: A code from begin_connect, in place of repo_url/github_pat/branch.
     """
+    oauth_connection_id = None
+    if connect_code:
+        if not _AUTH_AVAILABLE:
+            return {"error": _NO_AUTH_MSG}
+        resolved = redeem_connect_code(connect_code, audience=_CONNECT_AUDIENCE)
+        if "error" in resolved:
+            return resolved
+        repo_url = resolved["remote_url"]
+        github_pat = resolved["pat"]
+        branch = resolved["branch"] or ""
+        # An id, not a secret -- lets add_dependency_repo re-resolve the same
+        # live GitHub authorization for library repos without a second human
+        # round trip (note-0086). None on the PAT path, which is single-use.
+        oauth_connection_id = resolved["oauth_connection_id"]
+    elif not repo_url or not github_pat:
+        return {"error": "Provide either (repo_url and github_pat) or connect_code."}
+
     session_id = svc.create_session()
     try:
         git_svc.clone_repo(repo_url, github_pat, session_id, branch=branch)
@@ -189,7 +320,14 @@ def clone_capella_repo(
         'include_realizing': include_realizing,
         'yaml_path':         None,
         'resources':         {},
+        'oauth_connection_id': oauth_connection_id,
     })
+
+    if connect_code:
+        # Burn the code only now that the clone actually succeeded -- a
+        # transient git failure must not spend the one use the human granted.
+        consume_connect_code(connect_code)
+
     return {
         "session_id": session_id,
         "aird_file":  aird_path.name,
@@ -316,8 +454,8 @@ def generate_fabric(session_id: str) -> dict:
 def add_dependency_repo(
     session_id:    str,
     repo_url:      str,
-    github_pat:    str,
     resource_name: str,
+    github_pat:    str = "",
     branch:        str = "",
 ) -> dict:
     """Clone a dependency library repository and register it with the session.
@@ -326,15 +464,44 @@ def add_dependency_repo(
     resource_name must match the name used in the main model's cross-references
     (e.g. "Bike BrakeSystem Library"). Can be called multiple times for multiple libraries.
 
+    github_pat is optional. If the session was started with a connect_code that
+    the human fulfilled by choosing "Connect with GitHub", that one GitHub
+    authorization already covers their library repos too — omit github_pat and
+    it is reused automatically, no further browser round trip. If they fulfilled
+    it by pasting a PAT instead, that snapshot is single-use by design and this
+    tool will say so; run begin_connect again for this dependency (or prefer the
+    GitHub option next time).
+
     Args:
         session_id:    Session ID returned by clone_capella_repo
         repo_url:      HTTPS URL of the dependency repository
-        github_pat:    GitHub PAT with repo read access
         resource_name: Name this library is referenced by in the main model
+        github_pat:    GitHub PAT with repo read access. Omit to reuse the
+                       session's existing GitHub authorization.
         branch:        Git branch to clone (default: repo's default branch)
     """
     try:
         session  = svc.load_session(session_id)
+    except Exception as exc:
+        return {"error": str(exc)}
+
+    if not github_pat:
+        conn_id = session.get('oauth_connection_id')
+        if not conn_id:
+            return {"error": "This session has no reusable GitHub authorization — it was started "
+                             "with a PAT, or with a connect code the user fulfilled by pasting a "
+                             "PAT (single-use by design). Pass github_pat, or call begin_connect "
+                             "again for this dependency repo."}
+        if not _AUTH_AVAILABLE:
+            return {"error": _NO_AUTH_MSG}
+        # Decrypt fresh per call from the connection id held in session.json --
+        # the id is not itself a secret (note-0086).
+        github_pat = resolve_oauth_credential(conn_id) or ""
+        if not github_pat:
+            return {"error": "The GitHub connection this session was authorized with no longer exists. "
+                             "Pass github_pat, or call begin_connect again."}
+
+    try:
         safe_dir = re.sub(r'[^\w\-]', '_', resource_name)
         dep_dir  = svc._session_dir(session_id) / 'deps' / safe_dir
         git_svc.clone_to_dir(repo_url, github_pat, dep_dir, branch=branch)

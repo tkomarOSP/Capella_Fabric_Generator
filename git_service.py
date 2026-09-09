@@ -11,8 +11,12 @@ import capella_service as svc
 def clone_repo(repo_url: str, pat: str, session_id: str, branch: str = "") -> None:
     """Clone a GitHub repo using a PAT into <session>/unpacked/.
 
-    The PAT is injected into the HTTPS URL at call time and never written
-    to disk or exposed in log messages.
+    The PAT is scrubbed from any error message raised here, but note that
+    git.Repo.clone_from persists the authenticated URL as the clone's `origin`
+    remote -- so the credential DOES land on disk, in <dest>/.git/config, for
+    the life of the session directory. That is in fact what makes
+    push_model_changes work with no credential of its own. Session dirs are
+    removed by cleanup_session (cousin_back_log/note-0086).
     """
     clone_dir = svc._session_dir(session_id) / 'unpacked'
     clone_dir.mkdir(exist_ok=True)

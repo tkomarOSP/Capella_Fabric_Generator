@@ -6,6 +6,15 @@ After=network.target
 User=www-data
 WorkingDirectory=/opt/capella_fabric_generator
 Environment="CAPELLA_TOOLS_PATH=/opt/capella_tools"
+# Cartenza co-deploy only (note-0086). Absent on the standalone droplet, where
+# kp-auth isn't installed and github_pat is passed directly -- the server runs
+# fine with none of these set. On the Cartenza droplet this file must supply:
+#   CARTENZA_DB_PATH             same SQLite file the other Cartenza services use
+#   CARTENZA_CONNECT_SECRET_KEY  MUST match kp-connect's byte for byte, or
+#                                decryption fails silently at redeem time, not
+#                                at startup (kp/auth/secrets.py:23-40)
+#   KP_CONNECT_BASE_URL          e.g. https://connect.cartenza.ai
+EnvironmentFile=-/etc/capella-mcp.env
 ExecStart=/opt/capella_fabric_generator/.venv/bin/python mcp_server.py
 Restart=always
 RestartSec=5
