@@ -69,12 +69,77 @@ def commit_changes(
     return {"status": "committed", "sha": repo.head.commit.hexsha[:8]}
 
 
+# PushInfo.flags bits worth naming in an error message, most specific first.
+# GitPython sets several at once (REJECTED almost always arrives with ERROR),
+# so these are reported as a set rather than a single cause.
+_PUSH_FLAG_NAMES = (
+    ('REJECTED',        'rejected'),
+    ('REMOTE_REJECTED', 'rejected by the remote'),
+    ('REMOTE_FAILURE',  'remote failure'),
+    ('ERROR',           'error'),
+)
+
+
+def _describe_push(pi) -> str:
+    """Render one PushInfo as something a caller can act on.
+
+    git.remote.PushInfo defines no __str__, so str(pi) yields
+    '<git.remote.PushInfo object at 0x...>' -- a raw repr that reached real
+    users as the entire error message and cost them two extra re-clones just to
+    find out whether a push had landed (After_Treatment_System_Notebook/
+    Fabric_MCP_Issues OBS-0002). Everything useful is in .summary and .flags.
+    """
+    flags = getattr(pi, 'flags', 0) or 0
+    reasons = [label for name, label in _PUSH_FLAG_NAMES
+               if flags & getattr(type(pi), name, 0)]
+    summary = (getattr(pi, 'summary', '') or '').strip()
+    ref = getattr(pi, 'remote_ref_string', '') or ''
+
+    parts = []
+    if ref:
+        parts.append(ref)
+    if reasons:
+        parts.append(', '.join(reasons))
+    if summary:
+        parts.append(summary)
+    detail = ' — '.join(parts) if parts else 'push failed for an unreported reason'
+
+    # By far the most common real cause, and the one whose remedy isn't
+    # obvious from git's own wording.
+    if 'non-fast-forward' in summary.lower() or 'fetch first' in summary.lower():
+        detail += (" — the remote has commits this session doesn't have. "
+                   "Re-clone into a fresh session and reapply the change; this "
+                   "session's local ref has diverged and cannot be pushed.")
+    return detail
+
+
 def push_changes(session_id: str) -> dict:
     """Push committed changes to remote origin."""
     repo_dir = svc._session_dir(session_id) / 'unpacked'
     repo = git.Repo(str(repo_dir))
     push_info = repo.remote('origin').push()
-    errors = [str(pi) for pi in push_info if pi.flags & pi.ERROR]
-    if errors:
-        return {"status": "error", "message": "; ".join(errors)}
-    return {"status": "ok", "ref": str(push_info[0].remote_ref_string)}
+
+    if not push_info:
+        # No PushInfo at all -- nothing was transmitted. Previously this fell
+        # through to push_info[0] and raised IndexError, surfacing as a generic
+        # exception with no indication of what went wrong.
+        return {"status": "error",
+                "message": "The remote reported nothing for this push. Check that the "
+                           "session's branch has commits and that origin is reachable."}
+
+    failed = [pi for pi in push_info
+              if pi.flags & (pi.ERROR | pi.REJECTED | pi.REMOTE_REJECTED | pi.REMOTE_FAILURE)]
+    if failed:
+        return {"status": "error",
+                "message": "; ".join(_describe_push(pi) for pi in failed)}
+
+    first = push_info[0]
+    result = {"status": "ok", "ref": str(first.remote_ref_string)}
+    if first.flags & first.UP_TO_DATE:
+        # Distinct from a real push: nothing was sent. Callers were previously
+        # unable to tell this apart from "changes pushed", which is half of why
+        # re-clone-to-verify became a habit.
+        result["message"] = "Already up to date — the remote already has these commits; nothing was pushed."
+    else:
+        result["message"] = f"Pushed to {first.remote_ref_string}."
+    return result

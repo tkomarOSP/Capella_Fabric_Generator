@@ -129,6 +129,15 @@ mcp = FastMCP(
         "/onboarding/agents on the Cartenza site. On that connect page, 'Connect with GitHub' "
         "is better than pasting a PAT: one GitHub authorization also covers the model's library "
         "repos, so add_dependency_repo then needs no credential at all. "
+        "Two things about connect codes that save the human unnecessary browser trips: a code is "
+        "consumed only when a clone actually SUCCEEDS, so if clone_capella_repo fails (bad branch, "
+        "empty repo, no .aird) retry with the SAME code rather than asking for a new link — the "
+        "error message says so explicitly. And a code expires 15 minutes after begin_connect, so "
+        "only then does the user genuinely need to reissue one. "
+        "Sessions are disposable and are swept about 4 hours after last use; a session_id that has "
+        "gone quiet that long, or one that predates a server restart, is gone and needs a fresh "
+        "clone. That is a new authorization event, so batch model work rather than re-cloning "
+        "between every step. "
         "If the model depends on library repos, call add_dependency_repo for each before browsing. "
         "Call list_object_types() to discover valid phase/object_type combinations before browsing. "
         "Then browse or resolve UUIDs, then generate_fabric to get the YAML content. "
@@ -153,6 +162,16 @@ mcp = FastMCP(
         "back-references it onto the parent's applied_property_value_groups in the same patch "
         "-- no separate follow-up patch is needed for Capella to treat the group as applied. "
         "Explicit _type values are always respected; auto-injection only fills in when absent. "
+        "One documented gap at PA: child PhysicalFunctions cannot be created under a "
+        "PhysicalFunction by any patch shape or _type value — capellambse 0.8.1 binds "
+        "PhysicalFunction.functions to PhysicalComponent (ownedPhysicalComponents) and defines no "
+        "owned-child-function attribute on PhysicalFunction, so the type hint can never resolve. "
+        "This is an upstream metamodel defect, not a patch error, and the server now says so "
+        "rather than letting capellambse's bare 'Invalid type hint: PhysicalFunction' through. "
+        "Create such functions under the LA Root Logical Function (the identical patch shape works "
+        "there) and realize them onto PA, or model them in the Capella desktop editor. Targeting "
+        "the containing PhysicalFunctionPkg does succeed but makes siblings of the root physical "
+        "function, not children — a different structure, so choose it deliberately if at all. "
         "apply_model_patch cannot create FunctionalExchange/ComponentExchange/PhysicalLink "
         "elements (extend: exchanges:/component_exchanges:/physical_links:) -- these connect "
         "ports that this tool doesn't create or validate, so such patches are rejected with a "
@@ -298,17 +317,26 @@ def clone_capella_repo(
     elif not repo_url or not github_pat:
         return {"error": "Provide either (repo_url and github_pat) or connect_code."}
 
+    # Both failure paths below run BEFORE consume_connect_code, so the code is
+    # still live. Say so explicitly: the invariant was previously documented
+    # only in source comments, so a real user rediscovered it by trial and
+    # (reasonably) declined to rely on it, paying for extra browser round trips
+    # instead (After_Treatment_System_Notebook/Fabric_MCP_Issues OBS-0003).
+    retry_hint = (" Your connect_code was NOT consumed — fix the cause and call "
+                  "clone_capella_repo again with the same code. Only ask the user "
+                  "for a new link if it has expired (15 minutes from issue).") if connect_code else ""
+
     session_id = svc.create_session()
     try:
         git_svc.clone_repo(repo_url, github_pat, session_id, branch=branch)
     except Exception as exc:
         svc.cleanup_session(session_id)
-        return {"error": str(exc)}
+        return {"error": f"{exc}{retry_hint}"}
 
     aird_path = svc.find_aird_file(session_id)
     if aird_path is None:
         svc.cleanup_session(session_id)
-        return {"error": "No .aird file found in the repository."}
+        return {"error": "No .aird file found in the repository." + retry_hint}
 
     archive_name = repo_url.rstrip('/').split('/')[-1].removesuffix('.git')
     svc.save_session(session_id, {

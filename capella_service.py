@@ -442,6 +442,55 @@ def _resolve_phase_for_uuid(model, uuid_str: str) -> str:
     return '—'
 
 
+def _is_function_object(obj) -> bool:
+    """True if obj is itself a Function/Activity, as opposed to a Component or Pkg."""
+    name = type(obj).__name__
+    return name.endswith('Function') or name.endswith('Activity')
+
+
+def _reject_pa_child_functions(model, parent_uuid: str) -> None:
+    """Refuse child-PhysicalFunction creation with a real explanation.
+
+    capellambse 0.8.1 binds PhysicalFunction.functions to *PhysicalComponent*
+    (role_tag ownedPhysicalComponents) and exposes no owned-child-function
+    attribute on PhysicalFunction at all -- verified directly against the
+    installed metamodel. LogicalFunction.functions is bound correctly
+    (LogicalFunction / ownedFunctions), which is why the same patch shape works
+    at LA and fails at PA.
+
+    So `_type: PhysicalFunction` is rejected by decl not because our injection
+    is wrong but because PhysicalFunction genuinely isn't a candidate class for
+    that attribute. Left alone, the caller sees only capellambse's bare
+    "Invalid type hint: PhysicalFunction" and has no way to tell an upstream
+    metamodel defect from a mistake in their own patch -- which is exactly what
+    happened in After_Treatment_System_Notebook/Fabric_MCP_Issues OBS-0001,
+    where four separate patch shapes were tried before the LA workaround was
+    found by accident.
+    """
+    obj = None
+    try:
+        obj = model.by_uuid(parent_uuid)
+    except Exception:
+        return
+    if not _is_function_object(obj):
+        return
+    raise ValueError(
+        "apply_model_patch cannot create child PhysicalFunctions under a "
+        f"PhysicalFunction ('{getattr(obj, 'name', parent_uuid)}'). This is an "
+        "upstream limitation, not a problem with your patch: capellambse 0.8.1 "
+        "binds PhysicalFunction.functions to PhysicalComponent "
+        "(ownedPhysicalComponents) and defines no owned-child-function "
+        "attribute on PhysicalFunction, so no _type value can satisfy it. "
+        "Two options that do work: (a) create the functions under the LA layer's "
+        "Root Logical Function, where the same patch shape is reliable, and "
+        "realize them onto PA; or (b) create them in the Capella desktop editor. "
+        "Note that targeting the containing PhysicalFunctionPkg instead does "
+        "succeed, but produces SIBLINGS of the root physical function rather "
+        "than children -- a different model structure, so it is not done "
+        "automatically here (cousin_back_log/note-0086, OBS-0001)."
+    )
+
+
 def _enforce_function_types(model, patch_data: list) -> None:
     """Inject/correct _type on function/activity children based on each parent's phase."""
     for item in patch_data:
@@ -457,6 +506,13 @@ def _enforce_function_types(model, patch_data: list) -> None:
         extend = item.get('extend', {})
         if not isinstance(extend, dict):
             continue
+        has_function_children = any(
+            isinstance(child, dict)
+            for attr in _FUNCTION_ATTRS
+            for child in extend.get(attr, [])
+        )
+        if phase == 'PA' and has_function_children:
+            _reject_pa_child_functions(model, parent_ref.value)
         for attr in _FUNCTION_ATTRS:
             for child in extend.get(attr, []):
                 if isinstance(child, dict):
