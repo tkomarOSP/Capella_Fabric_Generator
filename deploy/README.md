@@ -293,12 +293,37 @@ git clone https://github.com/tkSDISW/Capella_Tools /opt/capella_tools
 cd /opt/capella_fabric_generator
 python3.11 -m venv .venv
 .venv/bin/pip install -r requirements.txt
-.venv/bin/pip install -e /opt/knowledge_partner/kp/auth   # the optional piece
+.venv/bin/pip install -e /opt/knowledge_partner/kp/auth   # dependencies only -- see below
 ```
 
-`kp-auth` installs as a bare top-level `auth` package, not `kp.auth`. Harmless
-here — nothing else in this repo claims that name — but it is why the imports
-in `mcp_server.py` read `from auth.connect import ...`.
+**The `pip install` alone is not enough — it installs no code.** `kp/auth/`
+*is* the `auth` package (its modules sit directly inside), but its
+`pyproject.toml` lives in that same directory and declares
+`packages.find where = ["."] / include = ["auth*"]`. Building from
+`/opt/knowledge_partner/kp/auth`, setuptools therefore looks for an `auth/`
+subdirectory *inside* `kp/auth/`, finds nothing, and produces a valid but
+empty wheel. pip reports success; `import auth` then fails with
+`ModuleNotFoundError` for every user, root included.
+
+The install is still worth running -- it pulls in SQLAlchemy, PyJWT and
+cryptography, which the venv genuinely needs. The code itself is reached by
+putting the package's parent directory on the path instead:
+
+```
+PYTHONPATH=/opt/knowledge_partner/kp
+```
+
+That goes in the env file below. `/opt/knowledge_partner/kp/` contains `auth/`
+with an `__init__.py`, so `import auth.connect` resolves directly against the
+source -- which is what "installs as a bare top-level `auth`, not `kp.auth`"
+means in practice, and why `mcp_server.py`'s imports read
+`from auth.connect import ...`.
+
+Verify before going further, as the user systemd will actually run as:
+
+```bash
+sudo -u www-data PYTHONPATH=/opt/knowledge_partner/kp   /opt/capella_fabric_generator/.venv/bin/python -c "import auth.connect; print('kp-auth OK')"
+```
 
 ### C2. Environment file
 
@@ -308,6 +333,7 @@ working unchanged). On the Cartenza droplet, create it:
 
 ```bash
 cat > /etc/capella-mcp.env <<'EOF'
+PYTHONPATH=/opt/knowledge_partner/kp
 CARTENZA_DB_PATH=/var/lib/cartenza/cartenza.db
 CARTENZA_CONNECT_SECRET_KEY=<same value kp-connect uses>
 KP_CONNECT_BASE_URL=https://dev.connect.cartenza.ai
