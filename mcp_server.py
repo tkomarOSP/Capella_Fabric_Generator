@@ -647,6 +647,29 @@ def push_model_changes(session_id: str) -> dict:
     Args:
         session_id: Session ID from clone_capella_repo.
     """
+    # An OAuth-authorized session may have outlived its 8-hour access token,
+    # which clone_capella_repo baked into origin. Re-resolve before pushing
+    # rather than failing with the model edits already committed locally
+    # (cousin_back_log/note-0093). PAT sessions carry no connection id and skip
+    # this entirely, as does a standalone deployment with no kp-auth installed.
+    try:
+        session = svc.load_session(session_id)
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+    conn_id = session.get('oauth_connection_id')
+    if conn_id and _AUTH_AVAILABLE:
+        token = resolve_oauth_credential(conn_id) or ""
+        if not token:
+            return {"status": "error",
+                    "message": "The GitHub authorization for this session has expired or been "
+                               "revoked. Your model changes are still committed locally. Ask the "
+                               "user to reconnect, then start a new session and re-apply, or pass "
+                               "a PAT via clone_capella_repo."}
+        try:
+            git_svc.repoint_origin(session_id, token)
+        except Exception:
+            pass  # fall through and let the push report the real failure
+
     try:
         return git_svc.push_changes(session_id)
     except Exception as exc:

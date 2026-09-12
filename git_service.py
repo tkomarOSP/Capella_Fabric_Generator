@@ -4,6 +4,7 @@
 # Replaces save_upload() + unpack_archive() for the MCP server workflow.
 
 import git
+import re
 from pathlib import Path
 import capella_service as svc
 
@@ -111,6 +112,21 @@ def _describe_push(pi) -> str:
                    "Re-clone into a fresh session and reapply the change; this "
                    "session's local ref has diverged and cannot be pushed.")
     return detail
+
+
+def repoint_origin(session_id: str, pat: str) -> None:
+    """Re-point origin at a freshly issued credential.
+
+    clone_repo bakes the credential into origin's URL, so a session that
+    outlives it -- GitHub's OAuth access tokens last 8 hours -- pushes with a
+    dead one and fails after the model edits are already committed locally
+    (cousin_back_log/note-0093). Any credential already in the URL is stripped
+    first so this stays idempotent across repeated pushes.
+    """
+    repo = git.Repo(str(svc._session_dir(session_id) / 'unpacked'))
+    origin = repo.remote('origin')
+    clean = re.sub(r'^(https?://)[^/@]*@', r'', origin.url)
+    origin.set_url(_inject_pat(clean, pat))
 
 
 def push_changes(session_id: str) -> dict:
