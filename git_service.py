@@ -125,8 +125,24 @@ def repoint_origin(session_id: str, pat: str) -> None:
     """
     repo = git.Repo(str(svc._session_dir(session_id) / 'unpacked'))
     origin = repo.remote('origin')
-    clean = re.sub(r'^(https?://)[^/@]*@', r'', origin.url)
-    origin.set_url(_inject_pat(clean, pat))
+    origin.set_url(_inject_pat(_strip_credential(origin.url), pat))
+
+
+def _strip_credential(url: str) -> str:
+    """The bare remote URL, with any embedded credential removed.
+
+    Control characters are stripped too, and that is not defensive noise. The
+    first version of repoint_origin used a broken replacement template and
+    substituted a literal 0x01 byte where the scheme should have gone. Because
+    this runs on a URL this same function previously wrote, the damage
+    accumulated one byte per push -- git reported https://?github.com/...,
+    then https://??github.com/... -- which made retrying actively harmful
+    rather than merely useless (Fabric_MCP_Issues). A session cloned before
+    the fix still carries those bytes in .git/config, so stripping them here
+    is what lets it recover on the next push instead of needing a re-clone.
+    """
+    url = re.sub(r"[\x00-\x1f\x7f]", "", url)
+    return re.sub(r"^(https?://)[^/@]*@", r"\1", url)
 
 
 def push_changes(session_id: str) -> dict:
