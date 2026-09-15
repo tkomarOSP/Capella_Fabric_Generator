@@ -166,6 +166,7 @@ PHASE_COLLECTIONS: dict[str, dict[str, object]] = {
     "OA": {
         "Requirement":      _all_requirements,
         "Entity":           lambda m: m.oa.all_entities,
+        "Actor":            lambda m: [e for e in m.oa.all_entities if e.is_actor],
         "Activity":         lambda m: m.oa.all_activities,
         "Capability":       lambda m: m.oa.all_capabilities,
         "Entity Exchange":  lambda m: m.oa.all_entity_exchanges,
@@ -181,6 +182,7 @@ PHASE_COLLECTIONS: dict[str, dict[str, object]] = {
     "SA": {
         "Requirement":       _all_requirements,
         "Component":         lambda m: m.sa.all_components,
+        "Actor":             lambda m: [c for c in m.sa.all_components if c.is_actor],
         "Capability":        lambda m: m.sa.all_capabilities,
         "Function Exchange": lambda m: m.sa.all_function_exchanges,
         "Function":          lambda m: m.sa.all_functions,
@@ -198,6 +200,7 @@ PHASE_COLLECTIONS: dict[str, dict[str, object]] = {
         "Requirement":        _all_requirements,
         "Capability":         lambda m: m.la.all_capabilities,
         "Component":          lambda m: m.la.all_components,
+        "Actor":              lambda m: [c for c in m.la.all_components if c.is_actor],
         "Function":           lambda m: m.la.all_functions,
         "Function Exchange":  lambda m: m.la.all_function_exchanges,
         "Functional Chain":   lambda m: m.la.all_functional_chains,
@@ -214,6 +217,7 @@ PHASE_COLLECTIONS: dict[str, dict[str, object]] = {
     "PA": {
         "Requirement":        _all_requirements,
         "Component":          lambda m: m.pa.all_components,
+        "Actor":              lambda m: [c for c in m.pa.all_components if c.is_actor],
         "Function":           lambda m: m.pa.all_functions,
         "Functional Chain":   lambda m: m.pa.all_functional_chains,
         "Function Exchange":  lambda m: m.pa.all_function_exchanges,
@@ -295,13 +299,22 @@ def _parent_name(obj) -> str:
 
 def _object_info(obj) -> dict:
     type_name = obj.__class__.__name__
-    return {
+    info = {
         'uuid': str(obj.uuid),
         'name': getattr(obj, 'name', '—') or '—',
         'type': type_name,
         'layer': _layer_from_type(type_name),
         'parent': _parent_name(obj),
     }
+    # capellambse has no separate actor class: an actor is a component (or OA
+    # entity) with is_actor set, so `type` alone can't tell the two apart.
+    # Without this, a deliberate actor/behavior pair reads as two duplicate
+    # components -- a real review misdiagnosed exactly that
+    # (Fabric_MCP_Issues/OBS-0009). Only added where the attribute exists, so
+    # functions and exchanges don't carry a meaningless false.
+    if hasattr(obj, 'is_actor'):
+        info['is_actor'] = bool(obj.is_actor)
+    return info
 
 
 def resolve_uuids(model, uuid_list: list[str]) -> tuple[list[dict], list[str]]:
