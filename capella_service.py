@@ -57,8 +57,22 @@ def save_session(session_id: str, data: dict) -> None:
 
 
 def load_session(session_id: str) -> dict:
-    with open(_session_dir(session_id) / 'session.json') as f:
-        return json.load(f)
+    d = _session_dir(session_id)
+    with open(d / 'session.json') as f:
+        data = json.load(f)
+    # Mark the session as used. deploy/cleanup_sessions.sh removes session
+    # directories whose mtime is over 4 hours old, and a directory's mtime only
+    # changes when an entry directly inside it is added or removed. Rewriting
+    # session.json, browsing, and patching files under unpacked/ never did, so a
+    # session was swept 4 hours after it was *created*, however busy it was --
+    # not after last use, as documented. For two people iterating on one model
+    # that ended long sessions mid-work, and reconnecting costs an authorization.
+    # Nearly every tool loads the session, so touching here makes "last use" true.
+    try:
+        os.utime(d, None)
+    except OSError:
+        pass
+    return data
 
 
 def cleanup_session(session_id: str) -> None:

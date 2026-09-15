@@ -1,5 +1,5 @@
 flask>=3.0
 capellambse>=0.6
 gunicorn>=21.0
-mcp[cli]>=1.0
+mcp[cli]>=1.0,<2   # 2.x renamed FastMCP to MCPServer; mcp_server.py imports FastMCP
 gitpython>=3.1

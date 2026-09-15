@@ -108,9 +108,11 @@ def _describe_push(pi) -> str:
     # By far the most common real cause, and the one whose remedy isn't
     # obvious from git's own wording.
     if 'non-fast-forward' in summary.lower() or 'fetch first' in summary.lower():
-        detail += (" — the remote has commits this session doesn't have. "
-                   "Re-clone into a fresh session and reapply the change; this "
-                   "session's local ref has diverged and cannot be pushed.")
+        detail += (" — the remote has commits this session doesn't have, so this "
+                   "session and the remote have diverged. Call pull_model_changes to see "
+                   "what changed on each side. To take the remote's version without "
+                   "re-authorizing, call pull_model_changes(discard_local_changes=True) "
+                   "and reapply your change on top.")
     return detail
 
 
@@ -143,6 +145,92 @@ def _strip_credential(url: str) -> str:
     """
     url = re.sub(r"[\x00-\x1f\x7f]", "", url)
     return re.sub(r"^(https?://)[^/@]*@", r"\1", url)
+
+
+def _commit_summary(commit) -> dict:
+    return {"sha": commit.hexsha[:8], "author": commit.author.name, "message": commit.summary}
+
+
+def pull_changes(session_id: str, discard_local_changes: bool = False) -> dict:
+    """Bring the session's clone up to date with the remote -- fast-forward only.
+
+    Before this existed, the only way to see a change someone pushed was a brand
+    new clone, which on the credential-free path means a brand new browser
+    authorization. For two people taking turns on one model, that was an
+    authorization per turn (Fabric_MCP_Issues/OBS-0003, OBS-0005).
+
+    Never merges. Capella's .capella/.aird files are large XML, and an automatic
+    merge can produce a model that loads but is subtly wrong. So when both the
+    remote and this session have new commits, this reports the divergence and
+    changes nothing, unless discard_local_changes is explicitly set -- in which
+    case the session is reset to the remote and the discarded commits are named,
+    so the caller can reapply them.
+
+    Every patch is committed as it's applied, so there is never uncommitted work
+    in a session to protect: "local changes" means unpushed commits.
+    """
+    repo = git.Repo(str(svc._session_dir(session_id) / 'unpacked'))
+    try:
+        branch = repo.active_branch.name
+    except TypeError:
+        return {"status": "error",
+                "message": "This session's clone isn't on a branch, so there is nothing to pull into."}
+
+    repo.remote('origin').fetch()
+    upstream = f"origin/{branch}"
+    try:
+        repo.commit(upstream)
+    except (git.BadName, ValueError):
+        return {"status": "error",
+                "message": f"The remote has no branch '{branch}' -- it may have been renamed or deleted."}
+
+    incoming = [_commit_summary(c) for c in repo.iter_commits(f"HEAD..{upstream}")]
+    local = [_commit_summary(c) for c in repo.iter_commits(f"{upstream}..HEAD")]
+
+    if not incoming:
+        message = "Already up to date — the remote has nothing this session doesn't."
+        if local:
+            message += f" This session has {len(local)} commit(s) not yet pushed."
+        return {"status": "up_to_date", "incoming": [], "local": local, "message": message}
+
+    if local and not discard_local_changes:
+        return {
+            "status": "diverged",
+            "incoming": incoming,
+            "local": local,
+            "message": (
+                f"Nothing was changed. The remote has {len(incoming)} commit(s) this session "
+                f"doesn't, and this session has {len(local)} not yet pushed -- both sides have "
+                "moved, and model files aren't merged automatically. This session's commits are "
+                "still safe here. To take the remote's version, call pull_model_changes("
+                "discard_local_changes=True) and reapply your change on top of it; that needs no "
+                "new authorization."
+            ),
+        }
+
+    if local:  # discard_local_changes explicitly requested
+        repo.git.reset('--hard', upstream)
+        return {
+            "status": "pulled",
+            "incoming": incoming,
+            "discarded": local,
+            "message": (
+                f"Reset to the remote: {len(incoming)} commit(s) taken, and this session's "
+                f"{len(local)} unpushed commit(s) discarded as requested. Reapply those changes "
+                "if they're still wanted. Element UUIDs may have changed -- re-browse before "
+                "patching."
+            ),
+        }
+
+    repo.git.merge('--ff-only', upstream)
+    return {
+        "status": "pulled",
+        "incoming": incoming,
+        "message": (
+            f"Pulled {len(incoming)} commit(s). Element UUIDs may have changed -- re-browse "
+            "before patching rather than reusing UUIDs from before the pull."
+        ),
+    }
 
 
 def push_changes(session_id: str) -> dict:

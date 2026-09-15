@@ -213,6 +213,11 @@ mcp = FastMCP(
         "set a non-default Min/Max Card in the Capella desktop editor. "
         "Call verify_model after patching to scan for quality issues, then "
         "push_model_changes to sync to GitHub. "
+        "When someone else is working on the same model and pushes a change, call "
+        "pull_model_changes to pick it up in this session -- no new authorization, unlike a "
+        "re-clone. It only fast-forwards: if both sides have new commits it changes nothing and "
+        "reports the divergence; discard_local_changes=True takes the remote's version and lists "
+        "what was dropped so it can be reapplied. Re-browse after pulling, since UUIDs may change. "
         "Call cleanup_session when done to release disk space. "
         "© Open Sun Power, LLC — Apache 2.0."
     ),
@@ -655,33 +660,99 @@ def push_model_changes(session_id: str) -> dict:
     Args:
         session_id: Session ID from clone_capella_repo.
     """
-    # An OAuth-authorized session may have outlived its 8-hour access token,
-    # which clone_capella_repo baked into origin. Re-resolve before pushing
-    # rather than failing with the model edits already committed locally
-    # (cousin_back_log/note-0093). PAT sessions carry no connection id and skip
-    # this entirely, as does a standalone deployment with no kp-auth installed.
+    session, problem = _refresh_origin_credential(session_id)
+    if problem:
+        return problem
+    try:
+        return git_svc.push_changes(session_id)
+    except Exception as exc:
+        return {"status": "error", "message": _scrub_credential(str(exc))}
+
+
+@mcp.tool()
+def pull_model_changes(session_id: str, discard_local_changes: bool = False) -> dict:
+    """Bring this session up to date with changes someone else pushed — no new authorization.
+
+    For working on a model together: someone edits in Capella Studio and pushes,
+    and this picks that up in the existing session instead of re-cloning, which
+    on the credential-free path would cost a new browser authorization every turn.
+
+    Fast-forward only; model files are never merged automatically. Returns a
+    status of:
+      - "pulled"     — incoming commits applied; each is listed with author and message.
+      - "up_to_date" — nothing new on the remote.
+      - "diverged"   — the remote AND this session both have new commits. Nothing is
+                       changed; both sides are listed.
+
+    On "diverged", this session's unpushed work is still intact. To take the
+    remote's version instead, call again with discard_local_changes=True — the
+    discarded commits are listed so you can reapply them. Never set it without
+    telling the user what will be discarded.
+
+    After a pull, element UUIDs may have changed: re-browse before patching.
+
+    Args:
+        session_id:            Session ID from clone_capella_repo.
+        discard_local_changes: Reset to the remote, dropping this session's unpushed
+                               commits. Only when "diverged" and the user agrees.
+    """
+    session, problem = _refresh_origin_credential(session_id)
+    if problem:
+        return problem
+    try:
+        result = git_svc.pull_changes(session_id, discard_local_changes=discard_local_changes)
+    except Exception as exc:
+        return {"status": "error", "message": _scrub_credential(str(exc))}
+
+    # A pull can rename or move the model file; keep the session pointing at it.
+    if result.get("status") == "pulled":
+        aird = Path(session.get('aird_path', ''))
+        if not aird.exists():
+            found = _find_aird_in(svc._session_dir(session_id) / 'unpacked')
+            if found is None:
+                result["warning"] = "No .aird model file found after pulling."
+            else:
+                session['aird_path'] = str(found)
+                session['resolved_uuids'] = []
+                svc.save_session(session_id, session)
+                result["warning"] = f"The model file moved to {found.name}; the session now points at it."
+    return result
+
+
+def _scrub_credential(text: str) -> str:
+    """Remove any credential embedded in a remote URL from an error message."""
+    return re.sub(r'(https?://)[^/@\s]*@', r'\1', text)
+
+
+def _refresh_origin_credential(session_id: str):
+    """Load the session and point origin at a current credential.
+
+    Shared by push and pull, both of which talk to the remote through the URL
+    clone_capella_repo wrote. An OAuth-authorized session can outlive its 8-hour
+    access token; re-resolving here keeps that from failing mid-work
+    (cousin_back_log/note-0093). PAT sessions carry no connection id and skip
+    this, as does a standalone deployment without kp-auth.
+
+    Returns (session, None) on success, or (None, error_dict).
+    """
     try:
         session = svc.load_session(session_id)
     except Exception as exc:
-        return {"status": "error", "message": str(exc)}
+        return None, {"status": "error", "message": str(exc)}
     conn_id = session.get('oauth_connection_id')
     if conn_id and _AUTH_AVAILABLE:
         token = resolve_oauth_credential(conn_id) or ""
         if not token:
-            return {"status": "error",
-                    "message": "The GitHub authorization for this session has expired or been "
-                               "revoked. Your model changes are still committed locally. Ask the "
-                               "user to reconnect, then start a new session and re-apply, or pass "
-                               "a PAT via clone_capella_repo."}
+            return None, {"status": "error",
+                          "message": "The GitHub authorization for this session has expired or been "
+                                     "revoked. Any model changes are still committed locally. Ask the "
+                                     "user to reconnect, then start a new session and re-apply, or pass "
+                                     "a PAT via clone_capella_repo."}
         try:
             git_svc.repoint_origin(session_id, token)
         except Exception:
-            pass  # fall through and let the push report the real failure
-
-    try:
-        return git_svc.push_changes(session_id)
-    except Exception as exc:
-        return {"status": "error", "message": str(exc)}
+            pass  # let the git operation report the real failure
+    return session, None
 
 
 @mcp.tool()
