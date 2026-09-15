@@ -132,8 +132,10 @@ mcp = FastMCP(
         "Two things about connect codes that save the human unnecessary browser trips: a code is "
         "consumed only when a clone actually SUCCEEDS, so if clone_capella_repo fails (bad branch, "
         "empty repo, no .aird) retry with the SAME code rather than asking for a new link — the "
-        "error message says so explicitly. And a code expires 15 minutes after begin_connect, so "
-        "only then does the user genuinely need to reissue one. "
+        "error message says so explicitly. And a link has two clocks: 4 hours for the user to "
+        "authorize it after begin_connect, then 1 hour for you to redeem it once they have. Only "
+        "expiry in one of those windows, or a successful clone, means the user genuinely needs a "
+        "new link -- if they say they authorized it, redeem rather than reissuing. "
         "Sessions are disposable and are swept about 4 hours after last use; a session_id that has "
         "gone quiet that long, or one that predates a server restart, is gone and needs a fresh "
         "clone. That is a new authorization event, so batch model work rather than re-cloning "
@@ -324,7 +326,8 @@ def clone_capella_repo(
     # instead (After_Treatment_System_Notebook/Fabric_MCP_Issues OBS-0003).
     retry_hint = (" Your connect_code was NOT consumed — fix the cause and call "
                   "clone_capella_repo again with the same code. Only ask the user "
-                  "for a new link if it has expired (15 minutes from issue).") if connect_code else ""
+                  "for a new link if it has genuinely lapsed (4 hours to authorize, "
+                  "then 1 hour to redeem).") if connect_code else ""
 
     session_id = svc.create_session()
     try:
