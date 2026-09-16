@@ -397,6 +397,12 @@ def clone_capella_repo(
         "session_id": session_id,
         "aird_file":  aird_path.name,
         "message":    f"Cloned '{archive_name}'. Use session_id for subsequent calls.",
+        # Which commit this session holds. A session never refreshes its clone
+        # on its own, so this is the answer to "is what I'm reading current?" --
+        # and pull_model_changes moves it. Reported here because the same
+        # question, asked of a knowledge repo, cost a live investigation into a
+        # caching layer that doesn't exist (Fabric_MCP_Issues/OBS-0012).
+        **_head_summary(session_id),
     }
 
 
@@ -740,7 +746,31 @@ def pull_model_changes(session_id: str, discard_local_changes: bool = False) -> 
                 session['resolved_uuids'] = []
                 svc.save_session(session_id, session)
                 result["warning"] = f"The model file moved to {found.name}; the session now points at it."
+    # Where the session sits now -- the same field clone reports, so "up to
+    # date" and "pulled" can be checked against the remote rather than trusted.
+    result.update(_head_summary(session_id))
     return result
+
+
+def _head_summary(session_id: str) -> dict:
+    """The commit this session's clone is on: {"commit", "committed_at"}.
+
+    Best-effort -- an odd checkout returns {} rather than failing a clone or a
+    pull that already succeeded.
+    """
+    try:
+        import subprocess  # noqa: PLC0415
+        result = subprocess.run(
+            ["git", "-C", str(svc._session_dir(session_id) / "unpacked"),
+             "log", "-1", "--format=%h|%cI"],
+            capture_output=True, text=True,
+        )
+        if result.returncode != 0 or "|" not in result.stdout:
+            return {}
+        commit, committed_at = result.stdout.strip().split("|", 1)
+        return {"commit": commit, "committed_at": committed_at}
+    except Exception:
+        return {}
 
 
 def _scrub_credential(text: str) -> str:
