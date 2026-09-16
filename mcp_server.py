@@ -56,6 +56,7 @@ try:
         redeem_connect_code,
         consume_connect_code,
         resolve_oauth_credential,
+        resolve_scoped_credential,
     )
     _AUTH_AVAILABLE = True
 except ImportError:
@@ -283,6 +284,7 @@ def clone_capella_repo(
     include_realized: bool = False,
     include_realizing: bool = False,
     connect_code: str = "",
+    agent_id: str = "",
 ) -> dict:
     """Clone a GitHub repository containing a Capella model.
 
@@ -298,6 +300,11 @@ def clone_capella_repo(
       `repo_url`/`branch` needed in that case; they're resolved server-side
       from the code, which a human already authorized in a browser. The model
       never sees the actual credential.
+    - **`repo_url` + `agent_id`, no credential at all** — for a repo this agent
+      is scoped to that its owner has already connected with "Connect with
+      GitHub". Reuses that standing authorization, so resuming after a lost
+      session costs the user nothing. Falls back to the message above if there
+      is no stored authorization to reuse.
 
     Args:
         repo_url: HTTPS URL of the GitHub repository
@@ -311,6 +318,8 @@ def clone_capella_repo(
         include_realized: Include realized references in the generated fabric
         include_realizing: Include realizing references in the generated fabric
         connect_code: A code from begin_connect, in place of repo_url/github_pat/branch.
+        agent_id: This agent's registered id. With repo_url and no credential,
+                  reconnects using the authorization its owner already gave.
     """
     oauth_connection_id = None
     if connect_code:
@@ -326,8 +335,23 @@ def clone_capella_repo(
         # live GitHub authorization for library repos without a second human
         # round trip (note-0086). None on the PAT path, which is single-use.
         oauth_connection_id = resolved["oauth_connection_id"]
+    elif repo_url and not github_pat and agent_id and _AUTH_AVAILABLE:
+        # The standing authorization path. A lost session used to cost a fresh
+        # browser trip even though the user's GitHub authorization was still
+        # valid in the database -- the whole re-authorization tax OBS-0003
+        # measured (cousin_back_log/note-0104). The agent's registered scope is
+        # the gate; the error explains what the user needs to do when there's
+        # nothing to reuse.
+        scoped = resolve_scoped_credential(agent_id, repo_url, branch)
+        if "error" in scoped:
+            return scoped
+        repo_url = scoped["remote_url"]
+        github_pat = scoped["pat"]
+        branch = scoped["branch"] or ""
+        oauth_connection_id = scoped["oauth_connection_id"]
     elif not repo_url or not github_pat:
-        return {"error": "Provide either (repo_url and github_pat) or connect_code."}
+        return {"error": "Provide either (repo_url and github_pat), connect_code, "
+                         "or (repo_url and agent_id) for a repo already connected with GitHub."}
 
     # Both failure paths below run BEFORE consume_connect_code, so the code is
     # still live. Say so explicitly: the invariant was previously documented
