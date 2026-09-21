@@ -127,7 +127,7 @@ mcp = FastMCP(
         "for the human to open in a browser and authorize there, then call "
         "clone_capella_repo(connect_code=...) with no github_pat/repo_url/branch needed "
         "(cousin_back_log/NOTE-0062, note-0086). Requires a registered agent first, at "
-        "/onboarding/agents on the Cartenza site. On that connect page, 'Connect with GitHub' "
+        "/onboarding/agents on the Cartenza site. On that connect page, 'Connect via GitHub' "
         "is better than pasting a PAT: one GitHub authorization also covers the model's library "
         "repos, so add_dependency_repo then needs no credential at all. "
         "Two things about connect codes that save the human unnecessary browser trips: a code is "
@@ -245,7 +245,7 @@ def begin_connect(agent_id: str, repo_url: str, branch: str = "main") -> dict:
     call clone_capella_repo(connect_code=<code>) — no github_pat, repo_url or
     branch needed, they're resolved from the code.
 
-    Prefer "Connect with GitHub" on that page over pasting a PAT: a GitHub
+    Prefer "Connect via GitHub" on that page over pasting a PAT: a GitHub
     authorization covers the model repo AND its library repos, so
     add_dependency_repo then needs no further credential. A pasted PAT is a
     single-use snapshot and each dependency would need its own connect code.
@@ -536,7 +536,7 @@ def add_dependency_repo(
     (e.g. "Bike BrakeSystem Library"). Can be called multiple times for multiple libraries.
 
     github_pat is optional. If the session was started with a connect_code that
-    the human fulfilled by choosing "Connect with GitHub", that one GitHub
+    the human fulfilled by choosing "Connect via GitHub", that one GitHub
     authorization already covers their library repos too — omit github_pat and
     it is reused automatically, no further browser round trip. If they fulfilled
     it by pasting a PAT instead, that snapshot is single-use by design and this
