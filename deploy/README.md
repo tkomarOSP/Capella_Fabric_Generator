@@ -109,10 +109,23 @@ The app will now be reachable at `http://165.22.188.83/`.
 ```bash
 cd /opt/capella_fabric_generator
 git pull
-or if need to discharge changes git reset --hard origin/master && git pull
+# or, if local changes need discarding: git reset --hard origin/master && git pull
 .venv/bin/pip install -r requirements.txt   # pick up any new deps
-systemctl restart capella-fabric
+
+# Restart BOTH services. capella_service.py is shared by the website and the
+# MCP server, so restarting only capella-fabric leaves agents on the old code
+# and on stale MCP `instructions` text -- with nothing failing to indicate it.
+# Skips whichever unit this droplet doesn't run, instead of aborting on it.
+for s in capella-fabric capella-mcp; do
+  systemctl cat "$s" >/dev/null 2>&1 \
+    && systemctl restart "$s" && echo "restarted $s"
+done
+systemctl is-active capella-fabric capella-mcp
 ```
+
+Restarting drops in-memory sessions on both services (an opened model, a cloned
+repo), so anyone mid-task will need to re-clone. Nothing is lost — models and
+artifacts live in git — but time a restart accordingly rather than mid-session.
 
 ---
 
