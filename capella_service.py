@@ -161,6 +161,66 @@ def _all_diagrams(m: capellambse.MelodyModel):
     return capellambse_model.DiagramAccessor(viewpoint=None).__get__(m)
 
 
+#: The viewpoint string each browse phase's own diagrams carry, as authored by
+#: Capella itself. These are the same four fixed strings capellambse bakes into
+#: its per-layer diagram accessors -- reproduced here rather than reused because
+#: we need to filter on them without inheriting the accessors' hiding behaviour
+#: described in _all_diagrams above.
+PHASE_VIEWPOINT: dict[str, str] = {
+    "OA": "Operational Analysis",
+    "SA": "System Analysis",
+    "LA": "Logical Architecture",
+    "PA": "Physical Architecture",
+}
+
+
+#: Reverse of PHASE_VIEWPOINT, for labelling a diagram row with the phase it
+#: belongs to. A viewpoint with no phase (Common, EPBS architecture) is shown
+#: by its own name instead -- more honest than picking a phase for it.
+_PHASE_FOR_VIEWPOINT: dict[str, str] = {vp: ph for ph, vp in PHASE_VIEWPOINT.items()}
+
+
+def _diagrams_for(phase: str):
+    """Build a diagram getter scoped to one phase -- without hiding anything.
+
+    Browsing a phase and getting every diagram in the model back (88 on a real
+    model, for all four phases alike) makes the phase selector meaningless, and
+    every row reported layer "—", so a result couldn't even be read back to
+    which phase it belonged to.
+
+    The blanket unscoping this replaces was not careless -- see _all_diagrams.
+    Scoping strictly to PHASE_VIEWPOINT[phase] would re-introduce exactly the
+    note-0044 bug it fixed, because a real model's diagrams don't divide neatly
+    into those four buckets:
+
+    - "Common" -- CDB/class and other data diagrams, 26 of 88 on Trail Power,
+      nearly a third of the model. These describe data used across every phase
+      and belong to none, so they are included from all four rather than being
+      arbitrarily assigned to one.
+    - Viewpoints matching no phase at all -- "EPBS architecture" is a real
+      Arcadia stage Cartenza offers no browse phase for. Filtering to known
+      viewpoints alone would make those unreachable from anywhere, which is the
+      note-0044 failure mode precisely.
+
+    So: this phase's own viewpoint, plus Common, plus anything unclaimed. Every
+    diagram stays reachable from somewhere, and a phase no longer answers with
+    the other three phases' work.
+    """
+    own = PHASE_VIEWPOINT[phase]
+    claimed = set(PHASE_VIEWPOINT.values())
+
+    def getter(m: capellambse.MelodyModel):
+        # "not in claimed" is what admits both Common and the unclaimed
+        # viewpoints: anything no phase owns is shown by every phase.
+        return [
+            d for d in _all_diagrams(m)
+            if (getattr(d, "viewpoint", None) or "") == own
+            or (getattr(d, "viewpoint", None) or "") not in claimed
+        ]
+
+    return getter
+
+
 def _model_wide(class_name: str):
     """Build a model-wide (unscoped) search lambda for a given class name.
 
@@ -185,7 +245,7 @@ PHASE_COLLECTIONS: dict[str, dict[str, object]] = {
         "Capability":       lambda m: m.oa.all_capabilities,
         "Entity Exchange":  lambda m: m.oa.all_entity_exchanges,
         "Process":          lambda m: m.oa.all_processes,
-        "Diagram":          _all_diagrams,
+        "Diagram":          _diagrams_for("OA"),
         "Data Package":            _model_wide("DataPkg"),
         "Class":                    _model_wide("Class"),
         "Association":              _model_wide("Association"),
@@ -202,7 +262,7 @@ PHASE_COLLECTIONS: dict[str, dict[str, object]] = {
         "Function":          lambda m: m.sa.all_functions,
         "Mission":           lambda m: m.sa.all_missions,
         "Functional Chain":  lambda m: m.sa.all_functional_chains,
-        "Diagram":           _all_diagrams,
+        "Diagram":           _diagrams_for("SA"),
         "Data Package":            _model_wide("DataPkg"),
         "Class":                    _model_wide("Class"),
         "Association":              _model_wide("Association"),
@@ -220,7 +280,7 @@ PHASE_COLLECTIONS: dict[str, dict[str, object]] = {
         "Functional Chain":   lambda m: m.la.all_functional_chains,
         "Interface":          lambda m: m.la.all_interfaces,
         "Component Exchange": lambda m: list(m.la.component_exchanges) + list(m.la.actor_exchanges),
-        "Diagram":            _all_diagrams,
+        "Diagram":            _diagrams_for("LA"),
         "Data Package":            _model_wide("DataPkg"),
         "Class":                    _model_wide("Class"),
         "Association":              _model_wide("Association"),
@@ -240,7 +300,7 @@ PHASE_COLLECTIONS: dict[str, dict[str, object]] = {
         "Physical Exchange":  lambda m: m.pa.all_physical_exchanges,
         "Physical Link":      lambda m: m.pa.all_physical_links,
         "Physical Path":      lambda m: m.pa.all_physical_paths,
-        "Diagram":            _all_diagrams,
+        "Diagram":            _diagrams_for("PA"),
         "Data Package":            _model_wide("DataPkg"),
         "Class":                    _model_wide("Class"),
         "Association":              _model_wide("Association"),
@@ -328,6 +388,16 @@ def _object_info(obj) -> dict:
     # functions and exchanges don't carry a meaningless false.
     if hasattr(obj, 'is_actor'):
         info['is_actor'] = bool(obj.is_actor)
+    # A diagram's class name carries no layer, so _layer_from_type returns "—"
+    # for every one of them. Its viewpoint is the real answer, and now that a
+    # phase browse deliberately includes cross-cutting diagrams (see
+    # _diagrams_for), a row has to say which kind it is -- otherwise the 26
+    # Common diagrams are indistinguishable from the phase's own.
+    viewpoint = getattr(obj, 'viewpoint', None)
+    if viewpoint is not None:
+        info['viewpoint'] = str(viewpoint)
+        if info['layer'] == '—':
+            info['layer'] = _PHASE_FOR_VIEWPOINT.get(str(viewpoint), str(viewpoint))
     return info
 
 

@@ -91,6 +91,14 @@
         change the Phase.
       </li>
       <li>
+        <strong>Diagrams span phases on purpose.</strong> Searching <em>Diagram</em> returns the
+        selected phase's own diagrams plus any that belong to no phase — class/data diagrams
+        (viewpoint <em>Common</em>) and stages with no phase of their own, such as
+        <em>EPBS architecture</em>. Those describe work used across the model, so they appear
+        under every phase rather than being hidden from all of them. The layer column names the
+        viewpoint for each, so you can tell them from the phase's own.
+      </li>
+      <li>
         <strong>Name contains</strong> — optional free-text filter. Leave blank to list all
         elements of the selected type. Matching is case-insensitive.
       </li>
