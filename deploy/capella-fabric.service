@@ -3,11 +3,18 @@ Description=Capella Fabric Generator
 After=network.target
 
 [Service]
+# --timeout 300: gunicorn's default is 30s, and opening or generating a fabric
+# from a large Capella model exceeds that comfortably. Past it, the worker is
+# SIGKILLed -- the browser gets a 502 and NO Python traceback is logged, which
+# makes it look like a code fault rather than a deadline. Kept in step with
+# proxy_read_timeout in nginx.conf: whichever is smaller is the real limit.
 User=www-data
 WorkingDirectory=/opt/capella_fabric_generator
 EnvironmentFile=/opt/capella_fabric_generator/.env
 ExecStart=/opt/capella_fabric_generator/.venv/bin/gunicorn \
           --workers 2 \
+          --timeout 300 \
+          --graceful-timeout 30 \
           --bind 127.0.0.1:8000 \
           --worker-tmp-dir /tmp \
           --access-logfile /var/log/capella-fabric/access.log \

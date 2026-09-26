@@ -99,10 +99,10 @@
                     {% elif obj.layer == 'SA' %}<span class="badge bg-info text-dark">SA</span>
                     {% elif obj.layer == 'LA' %}<span class="badge bg-primary">LA</span>
                     {% elif obj.layer == 'PA' %}<span class="badge bg-success">PA</span>
-                    {# A cross-cutting diagram (viewpoint 'Common', 'EPBS architecture') belongs
-                       to no phase and is shown under all of them, so name its viewpoint rather
-                       than the dash -- otherwise these rows are unreadable among the phase's own. #}
-                    {% elif obj.viewpoint %}<span class="badge bg-light text-dark border">{{ obj.viewpoint }}</span>
+                    {# A diagram outside the four browse phases -- EPBS, or one whose layer
+                       couldn't be resolved -- is shown under all of them, so name what it is
+                       rather than showing a bare dash. #}
+                    {% elif obj.layer and obj.layer != '—' %}<span class="badge bg-light text-dark border">{{ obj.layer }}</span>
                     {% else %}<span class="text-muted">—</span>
                     {% endif %}
                   </td>

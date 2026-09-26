@@ -91,12 +91,11 @@
         change the Phase.
       </li>
       <li>
-        <strong>Diagrams span phases on purpose.</strong> Searching <em>Diagram</em> returns the
-        selected phase's own diagrams plus any that belong to no phase — class/data diagrams
-        (viewpoint <em>Common</em>) and stages with no phase of their own, such as
-        <em>EPBS architecture</em>. Those describe work used across the model, so they appear
-        under every phase rather than being hidden from all of them. The layer column names the
-        viewpoint for each, so you can tell them from the phase's own.
+        <strong>Diagrams are scoped by the layer they were drawn in</strong> — taken from the
+        element each diagram targets, so a functional chain description like
+        <em>[LFCD] Generate Power</em> appears under LA, where it belongs. The one exception is
+        diagrams belonging to no phase offered here (<em>EPBS</em>, or any whose target can't be
+        resolved): those show under every phase rather than none, so nothing is unreachable.
       </li>
       <li>
         <strong>Name contains</strong> — optional free-text filter. Leave blank to list all

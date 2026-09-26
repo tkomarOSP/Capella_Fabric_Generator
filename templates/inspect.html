@@ -46,7 +46,7 @@
               {% elif obj.layer == 'SA' %}<span class="badge bg-info text-dark">SA</span>
               {% elif obj.layer == 'LA' %}<span class="badge bg-primary">LA</span>
               {% elif obj.layer == 'PA' %}<span class="badge bg-success">PA</span>
-              {% elif obj.viewpoint %}<span class="badge bg-light text-dark border">{{ obj.viewpoint }}</span>
+              {% elif obj.layer and obj.layer != '—' %}<span class="badge bg-light text-dark border">{{ obj.layer }}</span>
               {% else %}<span class="text-muted">—</span>
               {% endif %}
             </td>

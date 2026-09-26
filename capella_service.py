@@ -161,62 +161,126 @@ def _all_diagrams(m: capellambse.MelodyModel):
     return capellambse_model.DiagramAccessor(viewpoint=None).__get__(m)
 
 
-#: The viewpoint string each browse phase's own diagrams carry, as authored by
-#: Capella itself. These are the same four fixed strings capellambse bakes into
-#: its per-layer diagram accessors -- reproduced here rather than reused because
-#: we need to filter on them without inheriting the accessors' hiding behaviour
-#: described in _all_diagrams above.
-PHASE_VIEWPOINT: dict[str, str] = {
-    "OA": "Operational Analysis",
-    "SA": "System Analysis",
-    "LA": "Logical Architecture",
-    "PA": "Physical Architecture",
+#: Architecture-layer class name -> the phase label Cartenza browses by. These
+#: are the classes capellambse gives `<element>.layer`, which is the authoritative
+#: answer to "which layer is this in": it is containment in the model, not a
+#: string anyone can edit. EPBS is a real Arcadia stage with no browse phase of
+#: its own, so it is named here to be recognised, then handled as unclaimed.
+_LAYER_CLASS_PHASE: dict[str, str] = {
+    "OperationalAnalysis": "OA",
+    "SystemAnalysis": "SA",
+    "LogicalArchitecture": "LA",
+    "PhysicalArchitecture": "PA",
+    "EPBSArchitecture": "EPBS",
 }
 
+#: The phases the browse UI offers. EPBS is deliberately absent.
+BROWSE_PHASES = ("OA", "SA", "LA", "PA")
 
-#: Reverse of PHASE_VIEWPOINT, for labelling a diagram row with the phase it
-#: belongs to. A viewpoint with no phase (Common, EPBS architecture) is shown
-#: by its own name instead -- more honest than picking a phase for it.
-_PHASE_FOR_VIEWPOINT: dict[str, str] = {vp: ph for ph, vp in PHASE_VIEWPOINT.items()}
+
+def _viewpoint_of(obj) -> str | None:
+    """The object's viewpoint, or None if it hasn't got one or can't say.
+
+    getattr(obj, 'viewpoint', None) is not enough on its own. It swallows
+    AttributeError and nothing else, and on a real model these are lazy
+    properties that resolve through the .aird loader -- a descriptor pointing at
+    a representation that didn't load can raise from inside capellambse instead
+    of simply not having the attribute. Since _object_info calls this for every
+    object of every type, an exception here would be a server error on the whole
+    browse, for a field that is only ever decoration.
+
+    So: a diagram that cannot name its viewpoint is listed without one, which is
+    how it behaved before the field existed at all.
+    """
+    try:
+        viewpoint = getattr(obj, 'viewpoint', None)
+    except Exception:
+        return None
+    if viewpoint is None:
+        return None
+    try:
+        return str(viewpoint)
+    except Exception:
+        return None
+
+
+def _is_diagram(obj) -> bool:
+    """Is this a diagram descriptor rather than an ordinary model element?
+
+    Tested on the CLASS, so the property is never evaluated -- asking the
+    instance would run the very lazy resolution that can raise.
+
+    Worth gating on at all for two reasons. Model elements have targets too (a
+    FunctionalExchange has one), so an ungated layer lookup would quietly start
+    relabelling non-diagram rows. And it keeps two lazy property resolutions off
+    every element of every browse, which on a large model is the difference
+    between decoration and a timeout.
+    """
+    return hasattr(type(obj), 'viewpoint')
+
+
+def diagram_phase(d) -> str | None:
+    """Which phase a diagram belongs to, or None if it can't be determined.
+
+    Read from the diagram's TARGET -- the model element it describes -- via
+    capellambse's `.layer`, not from its viewpoint.
+
+    `viewpoint` looks like the obvious answer and is wrong. It is the *Sirius*
+    viewpoint, which groups diagram kinds, not Arcadia layers: every functional
+    chain description, sequence diagram, mode/state machine and class diagram
+    reports viewpoint "Common" no matter which layer it came from. On the real
+    Trail Power model that is 26 of 88 diagrams -- and among them
+    "[LFCD] Generate Power" (logical), "[SFCD] Charge USB Device" (system) and
+    "[PFCD] Provide Status" (physical) all claim the same "Common". Grouping by
+    viewpoint therefore mixes the layers together, which is exactly what a review
+    of the first attempt caught: logical diagrams appearing under every phase.
+
+    A diagram's target, by contrast, is contained in exactly one architecture
+    layer, and `.layer` reports it. Verified against the whole model: it resolves
+    a layer for all 88, and agrees with `viewpoint` on all 62 whose viewpoint
+    does name a layer -- so it is strictly better information, not a guess. It is
+    also rename-proof, where the "[LFCD]" name prefix a human reads is not.
+    """
+    try:
+        target = d.target
+    except Exception:
+        return None
+    if target is None:
+        return None
+    try:
+        layer = target.layer
+    except Exception:
+        return None
+    if layer is None:
+        return None
+    return _LAYER_CLASS_PHASE.get(type(layer).__name__)
 
 
 def _diagrams_for(phase: str):
-    """Build a diagram getter scoped to one phase -- without hiding anything.
+    """Build a diagram getter scoped to one phase.
 
-    Browsing a phase and getting every diagram in the model back (88 on a real
-    model, for all four phases alike) makes the phase selector meaningless, and
-    every row reported layer "—", so a result couldn't even be read back to
-    which phase it belonged to.
+    Previously a phase browse returned every diagram in the model -- 88 on Trail
+    Power, identical whichever phase was chosen, which made the selector inert.
 
-    The blanket unscoping this replaces was not careless -- see _all_diagrams.
-    Scoping strictly to PHASE_VIEWPOINT[phase] would re-introduce exactly the
-    note-0044 bug it fixed, because a real model's diagrams don't divide neatly
-    into those four buckets:
+    That blanket behaviour was itself a fix (note-0044): capellambse's per-layer
+    diagram accessors filter on one fixed viewpoint string each, so everything
+    reporting "Common" was invisible from every phase. Deriving the layer from
+    the target instead dissolves that problem rather than trading it: every
+    diagram gets a real layer, so scoping hides nothing.
 
-    - "Common" -- CDB/class and other data diagrams, 26 of 88 on Trail Power,
-      nearly a third of the model. These describe data used across every phase
-      and belong to none, so they are included from all four rather than being
-      arbitrarily assigned to one.
-    - Viewpoints matching no phase at all -- "EPBS architecture" is a real
-      Arcadia stage Cartenza offers no browse phase for. Filtering to known
-      viewpoints alone would make those unreachable from anywhere, which is the
-      note-0044 failure mode precisely.
-
-    So: this phase's own viewpoint, plus Common, plus anything unclaimed. Every
-    diagram stays reachable from somewhere, and a phase no longer answers with
-    the other three phases' work.
+    The one genuine exception is a diagram whose phase can't be placed -- an EPBS
+    diagram (a real Arcadia stage with no browse phase) or one whose target won't
+    resolve. Those are shown under EVERY phase rather than none, so the
+    note-0044 failure mode cannot recur: nothing is unreachable.
     """
-    own = PHASE_VIEWPOINT[phase]
-    claimed = set(PHASE_VIEWPOINT.values())
-
     def getter(m: capellambse.MelodyModel):
-        # "not in claimed" is what admits both Common and the unclaimed
-        # viewpoints: anything no phase owns is shown by every phase.
-        return [
-            d for d in _all_diagrams(m)
-            if (getattr(d, "viewpoint", None) or "") == own
-            or (getattr(d, "viewpoint", None) or "") not in claimed
-        ]
+        def keep(d) -> bool:
+            found = diagram_phase(d)
+            # None (unresolvable) and EPBS are both "no phase of its own", and
+            # anything in that state stays visible everywhere.
+            return found == phase or found not in BROWSE_PHASES
+
+        return [d for d in _all_diagrams(m) if keep(d)]
 
     return getter
 
@@ -393,11 +457,21 @@ def _object_info(obj) -> dict:
     # phase browse deliberately includes cross-cutting diagrams (see
     # _diagrams_for), a row has to say which kind it is -- otherwise the 26
     # Common diagrams are indistinguishable from the phase's own.
-    viewpoint = getattr(obj, 'viewpoint', None)
-    if viewpoint is not None:
-        info['viewpoint'] = str(viewpoint)
+    # A diagram's class name carries no layer, so _layer_from_type returns "—"
+    # for every one of them. Fill it from the target's own layer, NOT from the
+    # viewpoint: "Common" covers functional chains, sequence and class diagrams
+    # from every layer alike, so labelling a row "Common" tells the reader
+    # nothing and actively misleads (see diagram_phase).
+    #
+    # The two are resolved INDEPENDENTLY on purpose. Nesting the layer lookup
+    # under a successful viewpoint read means one unreadable decorative field
+    # costs the row its real layer -- caught by a test, not by inspection.
+    if _is_diagram(obj):
+        viewpoint = _viewpoint_of(obj)
+        if viewpoint is not None:
+            info['viewpoint'] = viewpoint
         if info['layer'] == '—':
-            info['layer'] = _PHASE_FOR_VIEWPOINT.get(str(viewpoint), str(viewpoint))
+            info['layer'] = diagram_phase(obj) or '—'
     return info
 
 

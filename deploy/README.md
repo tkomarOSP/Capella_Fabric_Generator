@@ -137,6 +137,39 @@ tail -f /var/log/capella-fabric/access.log
 tail -f /var/log/capella-fabric/error.log
 ```
 
+`capella_tools` emits a lot of `FutureWarning` lines about `.name` on relation
+objects, which drown everything else. Filter them out when hunting a real fault:
+
+```bash
+journalctl -u capella-fabric --since "-30min" --no-pager | grep -v FutureWarning
+```
+
+### "Server error" on a large model, with no traceback
+
+**No traceback is itself the diagnosis.** A gunicorn worker killed at its
+deadline dies without raising, so nothing Python-level is logged — it looks like
+a code fault but is a deadline. Confirm:
+
+```bash
+journalctl -u capella-fabric --since "-30min" --no-pager \
+  | grep -iE "WORKER TIMEOUT|SIGKILL|worker exiting"
+```
+
+Two deadlines govern a request, and **the smaller one wins**: `--timeout` in
+`capella-fabric.service` (gunicorn) and `proxy_read_timeout` in `nginx.conf`.
+Both are set to 300s and should be changed together — they were once 30s
+(gunicorn's default, unset) against 120s, which produced exactly this symptom.
+
+If instead the log shows the worker dying without reaching any timeout, suspect
+memory: two workers each holding a large model can exhaust a 4 GB droplet.
+
+```bash
+journalctl -k --since "-30min" | grep -i "out of memory\|oom-kill"
+```
+
+An OOM kill is a genuinely different problem — dropping to `--workers 1` is the
+quick mitigation, a larger droplet the real one.
+
 ---
 
 ## MCP Server Setup
