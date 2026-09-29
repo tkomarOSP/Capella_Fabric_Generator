@@ -437,7 +437,27 @@ rm /etc/nginx/sites-enabled/acme-bootstrap
 cp deploy/nginx_mcp_cartenza.conf /etc/nginx/sites-available/capella-mcp
 ln -sf /etc/nginx/sites-available/capella-mcp /etc/nginx/sites-enabled/
 nginx -t && systemctl reload nginx
+
+# 5. REQUIRED -- switch this lineage's renewal off webroot
+sed -i 's/^authenticator = webroot$/authenticator = nginx/'   /etc/letsencrypt/renewal/capella.cartenza.ai.conf
+certbot renew --cert-name capella.cartenza.ai --dry-run
 ```
+
+**Step 5 is not optional, and skipping it fails silently three months later.**
+`--webroot` issued the certificate against `/var/www/acme`, served by the
+bootstrap block that step 4 just deleted. The real config's port-80 block
+redirects everything to HTTPS, where there is no challenge location — so the
+renewal request gets a 404 and the certificate quietly expires. Verify rather
+than assume:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}
+'   https://capella.cartenza.ai/.well-known/acme-challenge/probe   # 404 = webroot is dead
+```
+
+The nginx authenticator needs no challenge path: it edits the running nginx
+temporarily, validates, and reverts. It is also what every other lineage on the
+Cartenza droplet uses, so one mechanism and one failure mode rather than two.
 
 `certonly` rather than `--nginx` on purpose: it issues the certificate without
 editing any config, so the file above stays the source of truth. Copying a repo
