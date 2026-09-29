@@ -399,9 +399,58 @@ writes a `-wal`/`-shm` sibling next to the file).
 
 ### C3. nginx and DNS
 
-Use `deploy/nginx_mcp_cartenza.conf` instead of `nginx_mcp.conf`, add a DNS A
-record for `dev.capella.cartenza.ai` pointing at the Cartenza droplet, then
-`certbot --nginx -d dev.capella.cartenza.ai`.
+Two configs, matching the kp repo's convention — `nginx_mcp_cartenza.conf` is
+**production** (`capella.cartenza.ai`), `nginx_mcp_dev_cartenza.conf` is **dev**
+(`dev.capella.cartenza.ai`). Install whichever this droplet is.
+
+Add the DNS A record first and let it resolve, then get the certificate, then
+install the config. **That order is not optional:** the config names a
+certificate in its 443 block, so installing it first makes `nginx -t` fail and
+nginx will not reload — and on a box already serving other sites, that means you
+cannot reload for anything else either until you back the file out.
+
+```bash
+# 1. after the A record resolves to this droplet
+dig +short @8.8.8.8 capella.cartenza.ai
+
+# 2. a temporary HTTP-only block, so Let's Encrypt can reach the new name
+#    without touching any config that is already serving
+mkdir -p /var/www/acme
+cat > /etc/nginx/sites-available/acme-bootstrap <<'EOF'
+server {
+    listen 80;
+    server_name capella.cartenza.ai;
+    root /var/www/acme;
+    location /.well-known/acme-challenge/ { allow all; }
+}
+EOF
+ln -sf /etc/nginx/sites-available/acme-bootstrap /etc/nginx/sites-enabled/
+nginx -t && systemctl reload nginx
+
+# 3. rehearse, then issue. --dry-run first: failed validations are what
+#    Let's Encrypt rate-limits, and "DNS has not propagated" is the likely one
+certbot certonly --webroot -w /var/www/acme -d capella.cartenza.ai --dry-run
+certbot certonly --webroot -w /var/www/acme -d capella.cartenza.ai
+
+# 4. drop the bootstrap, install the real config
+rm /etc/nginx/sites-enabled/acme-bootstrap
+cp deploy/nginx_mcp_cartenza.conf /etc/nginx/sites-available/capella-mcp
+ln -sf /etc/nginx/sites-available/capella-mcp /etc/nginx/sites-enabled/
+nginx -t && systemctl reload nginx
+```
+
+`certonly` rather than `--nginx` on purpose: it issues the certificate without
+editing any config, so the file above stays the source of truth. Copying a repo
+config over one certbot has already edited is how TLS was lost on this project
+once before.
+
+**Check the renewal authenticator afterwards.** Certificates issued with
+`--standalone` cannot renew while nginx holds port 80, and the failure is
+silent — four certificates on the Cartenza droplet reached 1–3 days of expiry
+that way, hidden among unrelated failures from stale lineages
+(`cousin_back_log`/note-0126). `certbot renew --dry-run` should report every
+lineage succeeding and nothing failing; if a lineage fails on a port-80 bind,
+set `authenticator = nginx` in its `/etc/letsencrypt/renewal/<name>.conf`.
 
 `mcp_server.py`'s `allowed_hosts` already lists `capella.cartenza.ai` and
 `dev.capella.cartenza.ai`. Any hostname *not* in that list returns 421 on every
