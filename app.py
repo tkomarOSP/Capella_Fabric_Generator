@@ -256,10 +256,15 @@ def generate():
 
     try:
         session = svc.load_session(session_id)
-        yaml_path, object_count = svc.generate_fabric(session)
+        yaml_path, object_count, artifact_count = svc.generate_fabric(session)
 
         session['yaml_path'] = str(yaml_path)
         session['object_count'] = object_count
+        # Kept separate from object_count on purpose: these are published
+        # artifacts (Polarion work items via Publication for Capella), not model
+        # objects, and counting them as objects would quietly change what that
+        # number means (cousin_back_log/note-0133).
+        session['artifact_count'] = artifact_count
         svc.save_session(session_id, session)
 
         # First ~40 lines for the preview pane

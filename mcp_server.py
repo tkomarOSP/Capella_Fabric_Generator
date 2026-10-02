@@ -149,6 +149,16 @@ mcp = FastMCP(
         "as duplicates without checking is_actor: an actor paired with a behavior component is a "
         "deliberate pattern. "
         "Then browse or resolve UUIDs, then generate_fabric to get the YAML content. "
+        "generate_fabric also folds in PUBLISHED REQUIREMENTS automatically when the repo carries "
+        "a <model>.traceability file beside the .aird -- written by Publication for Capella, "
+        "typically linking model elements to Polarion work items. Those appear in the YAML as "
+        "entries with type 'Traceability_Artifact Polarion Workitem Requirement', carrying an "
+        "identifier (e.g. VS-1518), a url you can cite, and the model elements they link to; the "
+        "response reports how many as traceability_artifacts. Only artifacts linked to elements "
+        "in your selection are included, so this answers 'which requirements bear on what I am "
+        "looking at' -- it is NOT a coverage list, and a count of 0 means either no traceability "
+        "file or no linked requirements for this selection, not that the model lacks requirements. "
+        "Requirement coverage questions belong to the publishing tool, which has the whole set. "
         "apply_model_patch uses py-capellambse's declarative format: target existing elements "
         "with !uuid <uuid>, use set: to update attributes and extend: to add children, and "
         "promise_id:/!promise for forward-references within the same patch. The server "
@@ -511,12 +521,18 @@ def generate_fabric(session_id: str) -> dict:
         session_id: Session ID returned by clone_capella_repo
     """
     try:
-        session              = svc.load_session(session_id)
-        yaml_path, obj_count = svc.generate_fabric(session)
-        content              = yaml_path.read_text(encoding='utf-8')
+        session = svc.load_session(session_id)
+        yaml_path, obj_count, artifact_count = svc.generate_fabric(session)
+        content = yaml_path.read_text(encoding='utf-8')
         return {
             "yaml_content":  content,
             "object_count":  obj_count,
+            # Published artifacts folded in from a .traceability file beside the
+            # .aird, when the repo carries one. Reported separately because they
+            # are not model objects, and because an agent cannot otherwise tell
+            # whether a fabric with none means "no traceability file" or "no
+            # requirements linked to this selection" (cousin_back_log/note-0133).
+            "traceability_artifacts": artifact_count,
             "filename":      yaml_path.name,
         }
     except Exception as exc:

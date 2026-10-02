@@ -498,13 +498,15 @@ def resolve_uuids(model, uuid_list: list[str]) -> tuple[list[dict], list[str]]:
 # Fabric generation
 # ---------------------------------------------------------------------------
 
-def generate_fabric(session: dict) -> tuple[Path, int]:
+def generate_fabric(session: dict) -> tuple[Path, int, int]:
     """
     Re-open the model and generate a YAML fabric for the resolved UUIDs.
 
     Returns:
-        yaml_path    — Path to the written .txt file
-        object_count — approximate count of primary objects in the output
+        yaml_path      — Path to the written .txt file
+        object_count   — approximate count of primary objects in the output
+        artifact_count — published artifacts folded in from a .traceability
+                         file, if the repo carries one (0 otherwise)
     """
     aird_path = Path(session['aird_path'])
     uuid_list: list[str] = session['resolved_uuids']
@@ -526,11 +528,42 @@ def generate_fabric(session: dict) -> tuple[Path, int]:
         except Exception:
             pass
 
+    # Published artifacts (Publication for Capella), when the repo carries a
+    # <model>.traceability file beside the .aird. Automatic rather than a
+    # parameter: the file exists only because someone published it, so its
+    # presence is the intent -- and ChatGPT freezes an MCP server's tool list at
+    # install, new parameters included, so a flag would be unreachable for
+    # existing connectors anyway (cousin_back_log/note-0133).
+    #
+    # Must run BETWEEN the primary loop above and generate_yaml_referenced_
+    # objects below: it appends artifacts to referenced_objects, which the next
+    # call is what renders.
+    #
+    # Guarded as a whole on top of the per-link tolerance added in
+    # Capella_Tools. Traceability is additional context; a fabric without it is
+    # still the thing the caller asked for, and losing the fabric to a bad
+    # publication file would be a poor trade.
+    artifact_count = 0
+    traceability_path = aird_path.with_suffix('.traceability')
+    if traceability_path.exists():
+        try:
+            from capella_tools import Pub4C  # noqa: PLC0415
+            store = Pub4C.Traceability_Store(str(traceability_path))
+            before = len(handler.referenced_objects)
+            handler.generate_traceability_related_objects(model, store)
+            artifact_count = len(handler.referenced_objects) - before
+        except Exception as exc:  # noqa: BLE001
+            print(f'[fabric] traceability skipped for {traceability_path.name}: {exc}', flush=True)
+            artifact_count = 0
+
     handler.generate_yaml_referenced_objects()
     yaml_content = handler.get_yaml_content()
 
-    # Count primary objects by occurrences of the primary_uuid key
-    object_count = yaml_content.count('primary_uuid:')
+    # Count primary objects by occurrences of the primary_uuid key. Artifacts
+    # render one too, so they are subtracted -- otherwise adding traceability
+    # would silently inflate the "objects" figure the MCP returns and the site
+    # displays, and the number would quietly start meaning something else.
+    object_count = yaml_content.count('primary_uuid:') - artifact_count
 
     archive_stem = Path(session.get('archive_name', 'model')).stem
     yaml_name = f'{archive_stem}_fabric.txt'
@@ -541,7 +574,7 @@ def generate_fabric(session: dict) -> tuple[Path, int]:
         f.write(yaml_content)
         f.write('\n')
 
-    return yaml_path, object_count
+    return yaml_path, object_count, artifact_count
 
 
 # ---------------------------------------------------------------------------
