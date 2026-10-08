@@ -700,7 +700,7 @@ def generate_fabric(session: dict) -> tuple[Path, int, int]:
     # parameter: the file exists only because someone published it, so its
     # presence is the intent -- and ChatGPT freezes an MCP server's tool list at
     # install, new parameters included, so a flag would be unreachable for
-    # existing connectors anyway (cousin_back_log/note-0133).
+    # existing connectors anyway (cousin_back_log/note-0135).
     #
     # Must run BETWEEN the primary loop above and generate_yaml_referenced_
     # objects below: it appends artifacts to referenced_objects, which the next

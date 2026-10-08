@@ -263,7 +263,7 @@ def generate():
         # Kept separate from object_count on purpose: these are published
         # artifacts (Polarion work items via Publication for Capella), not model
         # objects, and counting them as objects would quietly change what that
-        # number means (cousin_back_log/note-0133).
+        # number means (cousin_back_log/note-0135).
         session['artifact_count'] = artifact_count
         svc.save_session(session_id, session)
 

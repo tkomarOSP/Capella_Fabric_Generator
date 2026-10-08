@@ -542,7 +542,7 @@ def generate_fabric(session_id: str) -> dict:
             # .aird, when the repo carries one. Reported separately because they
             # are not model objects, and because an agent cannot otherwise tell
             # whether a fabric with none means "no traceability file" or "no
-            # requirements linked to this selection" (cousin_back_log/note-0133).
+            # requirements linked to this selection" (cousin_back_log/note-0135).
             "traceability_artifacts": artifact_count,
             "filename":      yaml_path.name,
         }
