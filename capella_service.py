@@ -300,6 +300,81 @@ def _model_wide(class_name: str):
     return lambda m: m.search(class_name, subclasses=True)
 
 
+
+def package_phase(pkg) -> str | None:
+    """Which phase a package belongs to, or None if it can't be determined.
+
+    Packages carry their own `.layer` -- unlike a diagram, which has to be
+    placed through its target (see `diagram_phase`). Measured on Trail Power:
+    25 `*Pkg` objects across 16 classes, and `.layer` resolves for all 25.
+    """
+    try:
+        layer = pkg.layer
+    except Exception:
+        return None
+    if layer is None:
+        return None
+    return _LAYER_CLASS_PHASE.get(type(layer).__name__)
+
+
+def _packages_for(phase: str, *class_names: str):
+    """Build a package getter scoped to one phase.
+
+    Before this, the only discoverable package type was "Data Package", and it
+    was registered as `_model_wide("DataPkg")` under all four phases -- so a PA
+    browse also returned OA's and SA's data packages. That is the symptom in
+    After_Treatment_System_Notebook/Fabric_MCP_Issues/OBS-0018, and it was
+    deliberate rather than accidental: `_model_wide`'s docstring records why
+    (note-0037 -- a search rooted at the wrong ancestor misses content rooted
+    elsewhere).
+
+    That reasoning still holds for the data-modeling *contents* (Class,
+    Association, ExchangeItem and friends), which are authored under whichever
+    DataPkg a modeller happened to pick. It does not hold for a package itself:
+    search from the model root, then place each result by its own layer. Same
+    shape as `_diagrams_for`, for the same reason.
+
+    Two behaviours inherited deliberately from `_diagrams_for`:
+
+    - A package whose layer places it outside the four browse phases, or whose
+      layer won't resolve, is shown under EVERY phase rather than none. EPBS's
+      `ConfigurationItemPkg` is the real case, and so is an imported
+      `CapellaModule`, which note-0037 found sitting above all four layers --
+      so the one container the requirements actually live in cannot go missing.
+
+      Note the limit of that rule, found by testing it: it only applies to
+      objects a registration actually asks for. `ConfigurationItemPkg` stayed
+      invisible until it was named alongside each layer's own component package
+      below, because nothing was searching for it -- "shown under every phase"
+      cannot rescue a class that is never looked up under any phase.
+    - An unknown class name is skipped, not raised. `m.search` raises
+      `MissingClassError` for a name this capellambse doesn't know, which would
+      otherwise take out an entire phase's browse for one bad entry.
+    """
+    def getter(m: capellambse.MelodyModel):
+        out = []
+        seen = set()
+        for class_name in class_names:
+            try:
+                found = m.search(class_name, subclasses=True)
+            except Exception:
+                # An unknown or ambiguous class name costs that one type, not
+                # the whole phase.
+                continue
+            for pkg in found:
+                placed = package_phase(pkg)
+                if placed != phase and placed in BROWSE_PHASES:
+                    continue
+                uuid = getattr(pkg, "uuid", None)
+                if uuid is not None:
+                    if uuid in seen:
+                        continue
+                    seen.add(uuid)
+                out.append(pkg)
+        return out
+
+    return getter
+
 PHASE_COLLECTIONS: dict[str, dict[str, object]] = {
     "OA": {
         "Requirement":      _all_requirements,
@@ -310,7 +385,13 @@ PHASE_COLLECTIONS: dict[str, dict[str, object]] = {
         "Entity Exchange":  lambda m: m.oa.all_entity_exchanges,
         "Process":          lambda m: m.oa.all_processes,
         "Diagram":          _diagrams_for("OA"),
-        "Data Package":            _model_wide("DataPkg"),
+        "Data Package":               _packages_for("OA", "DataPkg"),
+        "Entity Package":             _packages_for("OA", "EntityPkg"),
+        "Activity Package":           _packages_for("OA", "OperationalActivityPkg"),
+        "Capability Package":         _packages_for("OA", "OperationalCapabilityPkg"),
+        "Interface Package":          _packages_for("OA", "InterfacePkg"),
+        "Role Package":               _packages_for("OA", "RolePkg"),
+        "Requirement Package":        _packages_for("OA", "CapellaModule"),
         "Class":                    _model_wide("Class"),
         "Association":              _model_wide("Association"),
         "Exchange Item":            _model_wide("ExchangeItem"),
@@ -327,7 +408,13 @@ PHASE_COLLECTIONS: dict[str, dict[str, object]] = {
         "Mission":           lambda m: m.sa.all_missions,
         "Functional Chain":  lambda m: m.sa.all_functional_chains,
         "Diagram":           _diagrams_for("SA"),
-        "Data Package":            _model_wide("DataPkg"),
+        "Data Package":               _packages_for("SA", "DataPkg"),
+        "Component Package":          _packages_for("SA", "SystemComponentPkg", "ConfigurationItemPkg"),
+        "Function Package":           _packages_for("SA", "SystemFunctionPkg"),
+        "Capability Package":         _packages_for("SA", "CapabilityPkg"),
+        "Mission Package":            _packages_for("SA", "MissionPkg"),
+        "Interface Package":          _packages_for("SA", "InterfacePkg"),
+        "Requirement Package":        _packages_for("SA", "CapellaModule"),
         "Class":                    _model_wide("Class"),
         "Association":              _model_wide("Association"),
         "Exchange Item":            _model_wide("ExchangeItem"),
@@ -345,7 +432,12 @@ PHASE_COLLECTIONS: dict[str, dict[str, object]] = {
         "Interface":          lambda m: m.la.all_interfaces,
         "Component Exchange": lambda m: list(m.la.component_exchanges) + list(m.la.actor_exchanges),
         "Diagram":            _diagrams_for("LA"),
-        "Data Package":            _model_wide("DataPkg"),
+        "Data Package":               _packages_for("LA", "DataPkg"),
+        "Component Package":          _packages_for("LA", "LogicalComponentPkg", "ConfigurationItemPkg"),
+        "Function Package":           _packages_for("LA", "LogicalFunctionPkg"),
+        "Capability Package":         _packages_for("LA", "CapabilityRealizationPkg"),
+        "Interface Package":          _packages_for("LA", "InterfacePkg"),
+        "Requirement Package":        _packages_for("LA", "CapellaModule"),
         "Class":                    _model_wide("Class"),
         "Association":              _model_wide("Association"),
         "Exchange Item":            _model_wide("ExchangeItem"),
@@ -365,7 +457,12 @@ PHASE_COLLECTIONS: dict[str, dict[str, object]] = {
         "Physical Link":      lambda m: m.pa.all_physical_links,
         "Physical Path":      lambda m: m.pa.all_physical_paths,
         "Diagram":            _diagrams_for("PA"),
-        "Data Package":            _model_wide("DataPkg"),
+        "Data Package":               _packages_for("PA", "DataPkg"),
+        "Component Package":          _packages_for("PA", "PhysicalComponentPkg", "ConfigurationItemPkg"),
+        "Function Package":           _packages_for("PA", "PhysicalFunctionPkg"),
+        "Capability Package":         _packages_for("PA", "CapabilityRealizationPkg"),
+        "Interface Package":          _packages_for("PA", "InterfacePkg"),
+        "Requirement Package":        _packages_for("PA", "CapellaModule"),
         "Class":                    _model_wide("Class"),
         "Association":              _model_wide("Association"),
         "Exchange Item":            _model_wide("ExchangeItem"),
@@ -435,6 +532,18 @@ def _parent_name(obj) -> str:
         return '—'
 
 
+def _is_package(obj) -> bool:
+    """Whether this is a package -- a container, not a model element.
+
+    Class name rather than isinstance: the package classes come from several
+    capellambse namespaces (and `CapellaModule` from the requirements
+    extension), so there is no one base class to test against. Measured on
+    Trail Power: 16 distinct `*Pkg` classes.
+    """
+    name = type(obj).__name__
+    return name.endswith("Pkg") or name == "CapellaModule"
+
+
 def _object_info(obj) -> dict:
     type_name = obj.__class__.__name__
     info = {
@@ -472,6 +581,16 @@ def _object_info(obj) -> dict:
             info['viewpoint'] = viewpoint
         if info['layer'] == '—':
             info['layer'] = diagram_phase(obj) or '—'
+    # A package's class name carries no layer either -- DataPkg, InterfacePkg,
+    # CapellaModule and the rest -- so every package row read '—', which is
+    # exactly the complaint in OBS-0018 alongside the missing types themselves.
+    # A package has its own .layer, so fill it from that, the same way a diagram
+    # is filled from its target. Gated on _is_package rather than on layer == '—'
+    # alone: Class, Association and ExchangeItem also read '—', and giving them a
+    # layer is a separate question (they are authored under whichever DataPkg a
+    # modeller picked, which is why _model_wide exists) rather than a free win.
+    elif _is_package(obj) and info['layer'] == '—':
+        info['layer'] = package_phase(obj) or '—'
     return info
 
 
