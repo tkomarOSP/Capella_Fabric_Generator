@@ -478,16 +478,32 @@ def get_phase_types() -> dict[str, list[str]]:
 
 
 def search_by_name(model, phase: str, obj_type: str, name_query: str) -> list[dict]:
-    """Return _object_info dicts from a phase+type collection matching name_query (case-insensitive substring)."""
+    """Return _object_info dicts from a phase+type collection matching name_query.
+
+    Case-insensitive substring, matched against `name`, `long_name` and
+    `prefix`. The last two matter because an imported requirement leaves `name`
+    empty: searching for a requirement by its title found nothing at all, since
+    the title is in `long_name` (Fabric_MCP_Issues/OBS-0019 #1). `prefix` is
+    there so the ID a human cites -- REQ-000004/A -- is a usable query too.
+
+    Matching more fields can only widen results, never drop one that matched
+    before, so no existing query changes its answer.
+    """
     getter = PHASE_COLLECTIONS.get(phase, {}).get(obj_type)
     if getter is None:
         return []
     q = name_query.strip().lower()
-    return [
-        _object_info(obj)
-        for obj in getter(model)
-        if not q or q in (getattr(obj, 'name', '') or '').lower()
-    ]
+
+    def matches(obj) -> bool:
+        if not q:
+            return True
+        for attr in ('name', 'long_name', 'prefix'):
+            value = getattr(obj, attr, None)
+            if value is not None and q in str(value).lower():
+                return True
+        return False
+
+    return [_object_info(obj) for obj in getter(model) if matches(obj)]
 
 
 # ---------------------------------------------------------------------------
@@ -532,6 +548,26 @@ def _parent_name(obj) -> str:
         return '—'
 
 
+def _title_of(obj) -> str | None:
+    """A displayable title for an object whose `name` is empty, or None.
+
+    Requirements imported from a Word document through System Modeling
+    Workbench (requirement type `PlmRequirement`) leave `name` empty and carry
+    the title in `long_name`, with the ID in `prefix`. A browse therefore listed
+    all 19 of After_Treatment's requirements as "—", indistinguishable from each
+    other without pulling a fabric for every one
+    (Fabric_MCP_Issues/OBS-0019 #1).
+
+    capella_tools already relies on these two attributes directly when it
+    renders a requirement, so they are the model's own fields rather than a
+    guess -- and it already falls back the same way for a relation's name.
+    """
+    long_name = getattr(obj, "long_name", None)
+    if long_name is not None and str(long_name).strip():
+        return str(long_name).strip()
+    return None
+
+
 def _is_package(obj) -> bool:
     """Whether this is a package -- a container, not a model element.
 
@@ -559,6 +595,18 @@ def _object_info(obj) -> dict:
     # components -- a real review misdiagnosed exactly that
     # (Fabric_MCP_Issues/OBS-0009). Only added where the attribute exists, so
     # functions and exchanges don't carry a meaningless false.
+    # An empty name is not a nameless object: see _title_of. Only consulted when
+    # `name` gave nothing, so an object that has a real name keeps it.
+    if info['name'] == '—':
+        title = _title_of(obj)
+        if title is not None:
+            info['name'] = title
+    # The ID a human actually cites (REQ-000004/A). Added only where it exists
+    # and is non-empty, following the is_actor rule below -- a blank prefix on
+    # every component would be noise.
+    prefix = getattr(obj, 'prefix', None)
+    if prefix is not None and str(prefix).strip():
+        info['prefix'] = str(prefix).strip()
     if hasattr(obj, 'is_actor'):
         info['is_actor'] = bool(obj.is_actor)
     # A diagram's class name carries no layer, so _layer_from_type returns "—"
