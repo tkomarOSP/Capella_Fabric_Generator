@@ -50,6 +50,47 @@ python3.11 -m venv .venv
 
 ---
 
+## 4b. Pre-fetch the ELK layout binary
+
+`render_diagram_view` generates a view around a model element using
+`capellambse-context-diagrams`, which lays the graph out by calling ELK in a
+subprocess. It looks for, in order: a cached binary, `deno`, or **it downloads
+the binary from GitHub releases at request time**.
+
+That last fallback works, but on a server it is the wrong moment for it:
+measured at **19.9s for the first call** versus **0.3s warm**, plus an outbound
+dependency while a user waits and an executable written by the service account.
+
+Warm the cache once, as the service user, so the first real request is fast:
+
+```bash
+sudo -u www-data CAPELLA_TOOLS_PATH=/opt/capella_tools XDG_CACHE_HOME=/var/lib/capella-fabric/cache   /opt/capella_fabric_generator/.venv/bin/python -c "
+from capellambse_context_diagrams import _elkjs
+m = _elkjs.ELKManager()
+m.download_binary()
+print('elk binary at', m.binary_path)
+"
+```
+
+**`www-data` usually has no usable `HOME`**, so set `XDG_CACHE_HOME` to a
+directory it owns and set the same value in the service environment file —
+otherwise the cache lands somewhere unwritable and every call re-downloads or
+fails. Create it first:
+
+```bash
+mkdir -p /var/lib/capella-fabric/cache
+chown www-data:www-data /var/lib/capella-fabric/cache
+```
+
+Installing `deno` instead also works and skips the download entirely.
+
+Verify the running service actually has it, not just the shell you tested in:
+
+```bash
+ls -la /var/lib/capella-fabric/cache/capellambse_context_diagrams/
+tr '\0' '\n' < /proc/$(systemctl show capella-mcp -p MainPID --value)/environ | grep XDG_CACHE_HOME
+```
+
 ## 5. Configure environment variables
 
 ```bash

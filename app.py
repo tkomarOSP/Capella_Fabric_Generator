@@ -306,6 +306,38 @@ def download(session_id):
 
 
 # ---------------------------------------------------------------------------
+# View a rendered diagram page
+# ---------------------------------------------------------------------------
+
+@app.route('/view/<session_id>/<path:filename>', methods=['GET'])
+def view_page(session_id, filename):
+    """Serve a rendered view INLINE rather than as a download.
+
+    This is the standalone handoff: anyone running this server without
+    Cartenza has no workspace repo to store an artifact in, so the link to
+    this route is the whole of what they get -- and it has to open in a
+    browser, which /download does not, because it sends an attachment.
+
+    Only files this app generated are servable: the name must match the
+    view_*.html pattern and resolve inside the session directory, so a
+    crafted filename cannot walk out of it.
+    """
+    if not (filename.startswith('view_') and filename.endswith('.html')):
+        flash('Not a rendered view.')
+        return redirect(url_for('index'))
+    try:
+        base = svc._session_dir(session_id).resolve()
+        target = (base / filename).resolve()
+        if base not in target.parents or not target.exists():
+            flash('View not available — please generate it again.')
+            return redirect(url_for('index'))
+        return send_file(target, mimetype='text/html')
+    except Exception as exc:
+        flash(f'View error: {exc}')
+        return redirect(url_for('index'))
+
+
+# ---------------------------------------------------------------------------
 # Start over (clean up temp files)
 # ---------------------------------------------------------------------------
 

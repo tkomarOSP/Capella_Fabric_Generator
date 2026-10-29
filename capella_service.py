@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # Capella Fabric Generator — service layer: model loading, UUID resolution, YAML fabric generation.
 
+import base64
+import html
 import io
 import os
 import sys
@@ -794,6 +796,224 @@ _COMPONENT_ATTRS = frozenset({
     'components',        # SA, LA  (→ ownedSystemComponents / ownedLogicalComponents)
     'owned_components',  # PA      (→ ownedPhysicalComponents)
 })
+
+
+# ---------------------------------------------------------------------------
+# Diagram views — something the agent can hand a human to LOOK at
+# ---------------------------------------------------------------------------
+
+# Aspects capellambse-context-diagrams registers on model elements. Probed on
+# Trail Power at 0.8.2, and the spread is the reason this is a list rather than
+# a hardcoded `.context_diagram`:
+#
+#   context_diagram    11 of 13 element types
+#   realization_view   components and functions at every layer
+#   data_flow_view     Capability
+#   tree_view          Class
+#   (none)             FunctionalExchange -- and there are 112 of those in
+#                      Trail Power, the single most numerous type in the model
+#
+# So a hardcoded attribute would fail on the commonest element a user might ask
+# about. Discovery also means a new aspect in a later release appears without a
+# code change here, and an upgrade cannot leave a stale list quietly wrong.
+_VIEW_ASPECTS: tuple[str, ...] = (
+    'context_diagram',
+    'realization_view',
+    'data_flow_view',
+    'tree_view',
+    'interface_context_diagram',
+    'cable_tree_view',
+)
+
+
+def available_aspects(obj) -> list[str]:
+    """Which generated views this element supports, in preference order.
+
+    Checked against the CLASS, never the instance: on a capellambse diagram
+    object, attribute access is itself a render, so probing an instance with
+    hasattr() would draw the diagram just to ask whether it could.
+    """
+    cls = type(obj)
+    return [a for a in _VIEW_ASPECTS if a in dir(cls)]
+
+
+def view_targets(model, target: str) -> tuple[object, str]:
+    """Resolve a uuid or name to (object, kind) where kind is element|diagram.
+
+    A diagram is tried first: a diagram and an element can share a name, and
+    asking for "[PAB] Structure" plainly means the diagram.
+    """
+    for d in _all_diagrams(model):
+        if str(getattr(d, 'uuid', '')) == target or getattr(d, 'name', None) == target:
+            return d, 'diagram'
+    try:
+        obj = model.by_uuid(target)
+    except Exception:
+        obj = None
+    if obj is None:
+        for phase in BROWSE_PHASES:
+            for label in get_phase_types().get(phase, []):
+                for info in search_by_name(model, phase, label, target):
+                    if info['name'] == target:
+                        return model.by_uuid(info['uuid']), 'element'
+        raise ValueError(f"No diagram or element matches {target!r}")
+    return obj, 'element'
+
+
+def _svg_img(svg: str) -> str:
+    """Embed an SVG as a sandboxed <img> data URI rather than inline markup.
+
+    Inline <svg> executes any <script> it contains; an <img> never does. The
+    SVG here is rendered from a CUSTOMER'S model, whose element names and
+    descriptions we do not control, so the safe default costs nothing and
+    removes the question entirely. The page stays one self-contained file
+    either way.
+
+    base64 rather than percent-encoding: predictable ~33% overhead instead of
+    a worst case that depends on how much of the payload needs escaping.
+    """
+    data = base64.b64encode(svg.encode('utf-8')).decode('ascii')
+    return f'<img alt="diagram" src="data:image/svg+xml;base64,{data}">'
+
+
+_VIEW_CSS = """
+ body{font:15px/1.55 -apple-system,Segoe UI,Roboto,sans-serif;margin:0;
+      background:#f8fafc;color:#1e293b}
+ .wrap{max-width:1100px;margin:0 auto;padding:24px 16px}
+ h1{font-size:1.4rem;margin:0 0 .15rem}
+ .sub{color:#64748b;font-size:.85rem;margin-bottom:1.25rem}
+ .card{background:#fff;border:1px solid #e2e8f0;border-radius:10px;
+       padding:16px;margin-bottom:18px;overflow:auto}
+ .card img{max-width:100%;height:auto;display:block}
+ table{border-collapse:collapse;width:100%;font-size:.88rem}
+ th,td{text-align:left;padding:.4rem .6rem;border-bottom:1px solid #f1f5f9;
+       vertical-align:top}
+ th{color:#475569;font-weight:600}
+ td.t{color:#64748b;white-space:nowrap}
+ .foot{color:#94a3b8;font-size:.78rem;margin-top:1.5rem}
+ @media (prefers-color-scheme:dark){
+   body{background:#0f172a;color:#e2e8f0}
+   .card{background:#1e293b;border-color:#334155}
+   th{color:#94a3b8} td.t{color:#94a3b8}
+   th,td{border-bottom-color:#334155}
+ }
+"""
+
+
+def render_view_html(obj, kind: str, aspect: str, svg: str,
+                     elements: list[dict], commit: str) -> str:
+    """One self-contained page: the picture, and what is in it.
+
+    EVERY model-derived string goes through html.escape. This is the hazard the
+    YAML work did NOT have: there, a stray character broke a parser loudly;
+    here, an element named with markup would be injected into a page a human
+    opens in a browser. yaml_safe/yaml_str are the wrong tools and must not be
+    reached for out of habit -- different format, different escaping.
+    """
+    e = html.escape
+    name = e(str(getattr(obj, 'name', '') or '(unnamed)'))
+    title = f"{name} — {e(aspect.replace('_', ' '))}"
+
+    rows = []
+    for info in elements:
+        rows.append(
+            '<tr>'
+            f'<td>{e(str(info.get("name", "")))}</td>'
+            f'<td class="t">{e(str(info.get("type", "")))}</td>'
+            f'<td class="t">{e(str(info.get("layer", "")))}</td>'
+            f'<td class="t">{e(str(info.get("uuid", "")))}</td>'
+            '</tr>'
+        )
+    table = (
+        '<table><thead><tr><th>Name</th><th>Type</th><th>Layer</th>'
+        '<th>UUID</th></tr></thead><tbody>' + ''.join(rows) + '</tbody></table>'
+        if rows else '<p class="sub">No related elements resolved.</p>'
+    )
+
+    return (
+        '<!doctype html><html lang="en"><head><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width,initial-scale=1">'
+        f'<title>{title}</title><style>{_VIEW_CSS}</style></head><body><div class="wrap">'
+        f'<h1>{title}</h1>'
+        f'<div class="sub">{e(kind)} · model at commit {e(commit)}</div>'
+        f'<div class="card">{_svg_img(svg)}</div>'
+        f'<div class="card">{table}</div>'
+        '<div class="foot">Generated by Cartenza from the Capella model. '
+        'The diagram is an image; the table lists what it shows.</div>'
+        '</div></body></html>'
+    )
+
+
+def render_diagram_view(session: dict, target: str, aspect: str = '',
+                        commit: str = '') -> dict:
+    """Render one view of the model as a self-contained HTML page.
+
+    `target` is a uuid or name, resolving to an existing diagram or to a model
+    element whose view is GENERATED (capellambse-context-diagrams). Measured
+    warm on Trail Power: 0.1-1.4s and 1.4KB-106KB per view.
+
+    Writes into the session directory and returns the path -- never the body.
+    A standalone deployment opens that file directly; a Cartenza agent asks for
+    the body separately and promotes it to an html artifact. Returning it
+    always would spend a user's context on bytes they are about to read in a
+    browser (cousin_back_log/note-0140).
+
+    `artifact_name` is the name the caller should store it under, keyed by
+    (target, commit) so an unchanged model is a cache hit. The server owns the
+    naming rule so the two sides cannot disagree about what a hit looks like.
+    It is None when no commit is known -- the website path unpacks a zip and
+    has no git history, so there is nothing to key on and nothing to cache.
+    """
+    aird_path = Path(session['aird_path'])
+    session_id = session['session_id']
+    model = open_model(aird_path, resources=session.get('resources') or None)
+
+    obj, kind = view_targets(model, target)
+
+    if kind == 'diagram':
+        chosen, svg = 'diagram', obj.render('svg')
+        try:
+            shown = [_object_info(n.target) for n in getattr(obj, 'nodes', [])
+                     if getattr(n, 'target', None) is not None]
+        except Exception:
+            shown = []
+    else:
+        aspects = available_aspects(obj)
+        if not aspects:
+            raise ValueError(
+                f"{type(obj).__name__} {getattr(obj, 'name', '')!r} has no generated "
+                "view. FunctionalExchange is the common case -- ask for one of its "
+                "functions, or for a diagram by name."
+            )
+        if aspect and aspect not in aspects:
+            raise ValueError(
+                f"{type(obj).__name__} supports {', '.join(aspects)}, not {aspect!r}."
+            )
+        chosen = aspect or aspects[0]
+        svg = getattr(obj, chosen).render('svg')
+        shown = [_object_info(obj)]
+
+    if isinstance(svg, bytes):
+        svg = svg.decode('utf-8')
+
+    page = render_view_html(obj, kind, chosen, svg, shown, commit or 'unknown')
+
+    out_dir = _session_dir(session_id)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    safe = re.sub(r'[^A-Za-z0-9._-]', '_', f"{getattr(obj, 'uuid', target)}__{chosen}")
+    out_path = out_dir / f'view_{safe}.html'
+    out_path.write_text(page, encoding='utf-8')
+
+    return {
+        'path': str(out_path),
+        'kind': kind,
+        'aspect': chosen,
+        'aspects_available': available_aspects(obj) if kind == 'element' else ['diagram'],
+        'name': getattr(obj, 'name', '') or '',
+        'bytes': len(page),
+        'elements': len(shown),
+        'artifact_name': (f'capella_views/{safe}__{commit[:7]}.html' if commit else None),
+    }
 
 
 def _resolve_phase_for_uuid(model, uuid_str: str) -> str:

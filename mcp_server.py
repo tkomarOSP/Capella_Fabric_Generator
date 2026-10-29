@@ -160,6 +160,20 @@ mcp = FastMCP(
         "as duplicates without checking is_actor: an actor paired with a behavior component is a "
         "deliberate pattern. "
         "Then browse or resolve UUIDs, then generate_fabric to get the YAML content. "
+        "When the human asks to SEE something rather than be told about it, use "
+        "render_diagram_view. It takes a uuid or name and renders one self-contained "
+        "HTML page: an existing diagram, or a view GENERATED around a model element, "
+        "which works even when no authored diagram shows that element well. CHECK "
+        "BEFORE RENDERING -- the response carries artifact_name, keyed by the element "
+        "and the model commit; if an html artifact of that name is already in the "
+        "human's workspace repo, the model has not changed and you should just link "
+        "to it. On a miss, call again with include_html=true and write that body as "
+        "an html artifact under artifact_name, then hand over the viewer link. The "
+        "body is withheld by default because a page is 2KB-110KB and belongs in a "
+        "browser, not in the conversation. An element may offer several aspects (a "
+        "context view, a realization view across layers) -- aspects_available lists "
+        "them, so offer the choice instead of guessing. Some elements have none: a "
+        "FunctionalExchange has no generated view, and the error says so. "
         "generate_fabric also folds in PUBLISHED REQUIREMENTS automatically when the repo carries "
         "a <model>.traceability file beside the .aird -- written by Publication for Capella, "
         "typically linking model elements to Polarion work items. Those appear in the YAML as "
@@ -549,6 +563,64 @@ def generate_fabric(session_id: str) -> dict:
     except Exception as exc:
         return {"error": str(exc)}
 
+
+
+# ---------------------------------------------------------------------------
+# Tool — Render a view of the model for the human to LOOK at
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def render_diagram_view(
+    session_id:   str,
+    target:       str,
+    aspect:       str = "",
+    include_html: bool = False,
+) -> dict:
+    """Render one view of the model as a self-contained HTML page to hand over.
+
+    Use when the human asks to SEE something rather than be told about it.
+
+    `target` is a uuid or a name. It resolves to an existing diagram, or to a
+    model element whose view is GENERATED around it -- so this works even when
+    no authored diagram shows that element well, which is the usual case for a
+    single component someone is asking about.
+
+    CHECK BEFORE YOU RENDER. The response carries `artifact_name`, keyed by the
+    element and the model's commit. If an html artifact of that name already
+    exists in the human's workspace repo, the view has been made before and the
+    model has not changed since: just generate a viewer link for it and stop.
+    Rendering again costs time and tokens and produces an identical page.
+
+    On a miss, call with include_html=true and write the returned `html` as an
+    html artifact under `artifact_name`, then hand over its viewer link. Without
+    include_html the body is not returned at all -- a page is 2KB-110KB and
+    belongs in the human's browser, not in this conversation.
+
+    Running this server standalone, with no Cartenza workspace to write to:
+    ignore artifact_name and give the human the `path`; the page is complete on
+    its own and needs nothing else to open.
+
+    An element may support more than one aspect -- typically a context view and
+    a realization view across layers. `aspects_available` lists what this one
+    has; offer the human the choice rather than guessing. Some elements support
+    none at all (a FunctionalExchange has no generated view), and the error says
+    so rather than failing obscurely.
+
+    Args:
+        session_id:   Session ID returned by clone_capella_repo
+        target:       uuid or name of a model element, or of an existing diagram
+        aspect:       which view, when the element offers several; omit for its default
+        include_html: return the page body, for writing it as an artifact
+    """
+    try:
+        session = svc.load_session(session_id)
+        commit = _head_summary(session_id).get("commit", "") or ""
+        result = svc.render_diagram_view(session, target, aspect=aspect, commit=commit)
+        if include_html:
+            result["html"] = Path(result["path"]).read_text(encoding="utf-8")
+        return result
+    except Exception as exc:
+        return {"error": str(exc)}
 
 # ---------------------------------------------------------------------------
 # Tool 6 — Add a dependency library repository to the session
