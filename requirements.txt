@@ -1,5 +1,12 @@
 flask>=3.0
 capellambse>=0.6
+# Generates a context/realization view around an element. render_diagram_view
+# never imports it -- the package registers attributes on capellambse's classes
+# via entry points, and available_aspects() discovers them with dir(). So its
+# absence does not raise: every element simply reports no aspects and the
+# feature quietly does nothing. Pinned, because which aspects exist is a fact
+# about the installed version and the ELK binary is fetched per version.
+capellambse-context-diagrams==0.8.2
 gunicorn>=21.0
 mcp[cli]>=1.0,<2   # 2.x renamed FastMCP to MCPServer; mcp_server.py imports FastMCP
 gitpython>=3.1

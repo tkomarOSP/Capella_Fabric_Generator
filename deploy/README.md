@@ -66,7 +66,7 @@ Warm the cache once, as the service user, so the first real request is fast:
 ```bash
 sudo -u www-data CAPELLA_TOOLS_PATH=/opt/capella_tools XDG_CACHE_HOME=/var/lib/capella-fabric/cache   /opt/capella_fabric_generator/.venv/bin/python -c "
 from capellambse_context_diagrams import _elkjs
-m = _elkjs.ELKManager()
+m = _elkjs.elk_manager
 m.download_binary()
 print('elk binary at', m.binary_path)
 "
@@ -90,6 +90,16 @@ Verify the running service actually has it, not just the shell you tested in:
 ls -la /var/lib/capella-fabric/cache/capellambse_context_diagrams/
 tr '\0' '\n' < /proc/$(systemctl show capella-mcp -p MainPID --value)/environ | grep XDG_CACHE_HOME
 ```
+
+On x86_64 Linux the file is `elk-v0.8.2-x86_64-unknown-linux-gnu`. The version
+in that name is the pinned `capellambse-context-diagrams`, so **bumping the pin
+invalidates the cache** and the next call downloads again — this step belongs in
+any upgrade, not only the first install.
+
+The download `chmod`s the binary to `0700`, owner only. Pre-fetching as root
+rather than `www-data` therefore leaves a file the service cannot execute, and
+that surfaces as a permission error on a user's first request rather than at
+deploy time. The `sudo -u www-data` above is doing real work.
 
 ## 5. Configure environment variables
 
@@ -424,6 +434,7 @@ PYTHONPATH=/opt/knowledge_partner/kp
 CARTENZA_DB_PATH=/var/lib/cartenza/cartenza.db
 CARTENZA_CONNECT_SECRET_KEY=<same value kp-connect uses>
 KP_CONNECT_BASE_URL=https://dev.connect.cartenza.ai
+XDG_CACHE_HOME=/var/lib/capella-fabric/cache
 EOF
 chmod 600 /etc/capella-mcp.env
 chown www-data:www-data /etc/capella-mcp.env

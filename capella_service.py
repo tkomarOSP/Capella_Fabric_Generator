@@ -980,6 +980,21 @@ def render_diagram_view(session: dict, target: str, aspect: str = '',
     else:
         aspects = available_aspects(obj)
         if not aspects:
+            # Distinguish "this type has no view" from "nothing has a view".
+            # The aspects are attributes capellambse-context-diagrams registers
+            # on capellambse's classes, so a deployment that skipped installing
+            # it reaches this same branch for EVERY element -- and the message
+            # below would blame the element type, sending someone to look at
+            # their model instead of at the venv.
+            try:
+                import capellambse_context_diagrams  # noqa: F401,PLC0415
+            except ImportError:
+                raise ValueError(
+                    "No generated views are available at all: "
+                    "capellambse-context-diagrams is not installed in this "
+                    "environment. Install it (it is pinned in requirements.txt) "
+                    "and restart the service."
+                ) from None
             raise ValueError(
                 f"{type(obj).__name__} {getattr(obj, 'name', '')!r} has no generated "
                 "view. FunctionalExchange is the common case -- ask for one of its "
