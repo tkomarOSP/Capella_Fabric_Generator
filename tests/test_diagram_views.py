@@ -265,6 +265,31 @@ view_name = view_file.name
 EXP = int(time.time()) + 600
 TOK = svc.view_token(SID, view_name, EXP)
 
+# A second half to section 10, driven over the real MCP protocol rather than by
+# calling the tool as a function. Everything else here either calls the tool
+# directly or stubs mcp.get_context(), and neither proves the thing this design
+# rests on: that a request in flight over streamable-http is reachable at
+# ctx.request_context.request, so the absolute URL can be built from Host and
+# X-Forwarded-Proto with no configuration at all. Stubbed, the test passes
+# whether or not that holds -- the same shape of mistake as OBS-0023 itself,
+# where rendering was verified and delivery was not. No droplet needed, and one
+# StreamableHTTPSessionManager only runs once, so it shares the client below.
+import json
+
+_H = {"Accept": "application/json, text/event-stream",
+      "Content-Type": "application/json"}
+
+
+def _rpc_result(resp):
+    """The JSON-RPC payload, whether it arrived as JSON or as one SSE frame."""
+    for line in resp.text.splitlines():
+        if line.startswith("data: "):
+            return json.loads(line[6:])
+    return json.loads(resp.text)
+
+
+svc.save_session(SID, SESSION)
+
 HOST = "dev.capella.cartenza.ai"
 with TestClient(M.mcp.streamable_http_app(), base_url="https://" + HOST) as client2:
     url = "/view/" + SID + "/" + view_name
@@ -319,6 +344,51 @@ with TestClient(M.mcp.streamable_http_app(), base_url="https://" + HOST) as clie
                     params={"exp": EXP, "t": TOK})
     assert r.status_code == 404, r.status_code
     print("guard holds:       a signed request for a non-view is still 404")
+
+    # ----- 10d. the whole handoff, over the real transport -----
+    r = client2.post("/mcp", headers=_H, json={
+        "jsonrpc": "2.0", "id": 1, "method": "initialize",
+        "params": {"protocolVersion": "2025-06-18", "capabilities": {},
+                   "clientInfo": {"name": "test_diagram_views", "version": "0"}}})
+    assert r.status_code == 200, r.status_code
+    _H2 = dict(_H)
+    _H2["mcp-session-id"] = r.headers["mcp-session-id"]
+    client2.post("/mcp", headers=_H2,
+                 json={"jsonrpc": "2.0", "method": "notifications/initialized"})
+
+    r = client2.post("/mcp", headers=_H2, json={
+        "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+        "params": {"name": "render_diagram_view",
+                   "arguments": {"session_id": SID, "target": str(comp.uuid)}}})
+    assert r.status_code == 200, r.status_code
+    # One text content block per returned object -- reading only content[0] of a
+    # multi-object result is how a probe once reported "0 components".
+    result = json.loads(_rpc_result(r)["result"]["content"][0]["text"])
+    assert "error" not in result, result
+
+    served_url = result.get("url")
+    assert served_url, ("the tool returned no url over the real transport -- "
+                        "ctx.request_context.request is not reachable, and the "
+                        "whole link handoff rests on it")
+    assert served_url.startswith("https://" + HOST + "/view/" + SID + "/"), served_url
+
+    # And the link works: same host, same app, the bytes the renderer wrote.
+    fetched = client2.get(served_url.split(HOST, 1)[1])
+    assert fetched.status_code == 200, fetched.status_code
+    assert fetched.content == Path(result["path"]).read_bytes()
+    assert b"data:image/svg+xml;base64," in fetched.content, "the diagram is missing"
+    assert result["elements"] > 1, "a count of 1 is the old hardcoded-target bug"
+    print("real transport:    tools/call -> url -> 200, "
+          + str(len(fetched.content)) + "B, " + str(result["elements"]) + " elements")
+
+    # The body still does not travel unless asked for. THIS is the regression
+    # guard for OBS-0023: a result that carries the page by default is the
+    # defect, however well the route works.
+    assert "html" not in result, "the page body must not be in the tool result"
+    assert len(json.dumps(result)) < 1500, \
+        "a result this big is being relayed through the conversation again"
+    print("no relay:          result is " + str(len(json.dumps(result)))
+          + "B, page is " + str(result["bytes"]) + "B")
 
 
 # The absolute URL is built from the request, with no new configuration: nginx

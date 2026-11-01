@@ -354,6 +354,19 @@ Two things worth knowing before debugging a dead link:
   session id, filename and expiry. It reaches nothing but a `view_*.html`
   inside that one session directory, and every rejection is the same bare 404.
 
+To check the plumbing without a model, ask for a view that cannot exist. Both
+answers are 404, and the body is what tells them apart:
+
+```bash
+curl -s https://capella.cartenza.ai/view/none/view_none.html
+```
+
+- `Not found` — the request reached the app. nginx is proxying `/view`
+  correctly and the token check did its job. This is the good outcome.
+- an HTML `404 Not Found` page — nginx answered it itself, so the
+  `location /view` block is missing or nginx was not reloaded. A real signed
+  URL will fail the same way, and it will look like a bug in the tool.
+
 ---
 
 ### MCP 6. Connect from claude.ai
