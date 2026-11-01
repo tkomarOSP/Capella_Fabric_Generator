@@ -133,6 +133,33 @@ comp = model.search("LogicalComponent")[1]
 r_el = svc.render_diagram_view(SESSION, str(comp.uuid), commit=COMMIT)
 assert r_el["kind"] == "element" and r_el["aspect"] == "context_diagram"
 assert Path(r_el["path"]).exists()
+
+# The element list must describe the PICTURE, not the request. This shipped
+# wrong and the deployed server reported exactly one element for every
+# component in Residential_AC while its SVGs ranged 11KB-61KB -- the count was
+# hardcoded to the target itself. Checked against the diagram's own nodes, and
+# asserted to be more than one, because a count of 1 is precisely what the
+# defect produced and a test that tolerates it would not have caught it.
+# Render BEFORE reading nodes. The node list is populated by the layout, so a
+# cold read returns nothing -- which is why render_view's own extraction runs
+# after its render, and why reading it first here reported 0 and looked like a
+# second bug.
+_diag = comp.context_diagram
+_diag.render("svg")
+# A generated diagram's nodes ARE the model elements -- no `.target` on them,
+# unlike an authored diagram's. Filtering on `.target` here returned 0 and read
+# as a second bug; it was the same one, in the test.
+_nodes = [getattr(n, "target", None) or n for n in _diag.nodes]
+_nodes = [n for n in _nodes if getattr(n, "uuid", None) is not None]
+assert r_el["elements"] == len(_nodes),     f"reported {r_el['elements']} elements, the diagram shows {len(_nodes)}"
+assert r_el["elements"] > 1,     "this component's context diagram has neighbours -- a count of 1 is the old bug"
+_page = Path(r_el["path"]).read_text(encoding="utf-8")
+for _n in _nodes[:4]:
+    _name = getattr(_n, "name", "") or ""
+    if _name:
+        assert _name in _page, f"{_name!r} is in the diagram but not listed on the page"
+print("elements listed:   " + str(r_el["elements"]) + " of " + str(len(_nodes))
+      + " diagram nodes, each named on the page")
 print("element view:      " + r_el["aspect"] + ", " + str(r_el["bytes"]) + "B, aspects="
       + repr(r_el["aspects_available"]))
 

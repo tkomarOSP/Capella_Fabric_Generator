@@ -970,13 +970,37 @@ def render_diagram_view(session: dict, target: str, aspect: str = '',
 
     obj, kind = view_targets(model, target)
 
+    def _nodes_of(diagram):
+        """The model elements a rendered diagram actually shows.
+
+        Read from the diagram's own nodes rather than walked from the model, so
+        the list matches the picture instead of our idea of what should be in
+        it. Only valid AFTER render -- the node list is populated by the
+        layout, and a cold read returns nothing.
+
+        The two kinds of diagram hand back different things, which is the
+        trap here. An AUTHORED diagram yields diagram elements that reference
+        the model through `.target`. A GENERATED one yields the model elements
+        themselves, with no `.target` at all. Filtering on `.target` therefore
+        silently discarded every node of every generated view -- measured on
+        Trail Power's Boost, whose six neighbours all arrive as bare
+        LogicalComponents. Take the target when there is one, the node itself
+        otherwise.
+        """
+        out = []
+        for n in getattr(diagram, 'nodes', []):
+            element = getattr(n, 'target', None) or n
+            if getattr(element, 'uuid', None) is None:
+                continue
+            try:
+                out.append(_object_info(element))
+            except Exception:
+                continue
+        return out
+
     if kind == 'diagram':
         chosen, svg = 'diagram', obj.render('svg')
-        try:
-            shown = [_object_info(n.target) for n in getattr(obj, 'nodes', [])
-                     if getattr(n, 'target', None) is not None]
-        except Exception:
-            shown = []
+        shown = _nodes_of(obj)
     else:
         aspects = available_aspects(obj)
         if not aspects:
@@ -1005,8 +1029,18 @@ def render_diagram_view(session: dict, target: str, aspect: str = '',
                 f"{type(obj).__name__} supports {', '.join(aspects)}, not {aspect!r}."
             )
         chosen = aspect or aspects[0]
-        svg = getattr(obj, chosen).render('svg')
-        shown = [_object_info(obj)]
+        # Bind the diagram once. Attribute access on one of these IS a render,
+        # so reading the aspect twice would lay the graph out twice.
+        generated = getattr(obj, chosen)
+        svg = generated.render('svg')
+        # Was [_object_info(obj)] -- the target and nothing else, which made
+        # every context diagram report exactly one element however much it
+        # showed: the deployed server reported 1 for all 21 Residential_AC
+        # components while their SVGs ranged 11KB-61KB. The point of the list
+        # is to name what is in the picture, and it was naming what had been
+        # asked for instead. The fallback stays for the genuine single-node
+        # case -- a top-level component with no neighbours at its layer.
+        shown = _nodes_of(generated) or [_object_info(obj)]
 
     if isinstance(svg, bytes):
         svg = svg.decode('utf-8')
