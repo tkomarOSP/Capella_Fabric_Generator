@@ -3,9 +3,13 @@
 # Capella Fabric Generator — service layer: model loading, UUID resolution, YAML fabric generation.
 
 import base64
+import hashlib
+import hmac
 import html
 import io
 import os
+import secrets
+import time
 import sys
 import re
 import uuid
@@ -942,6 +946,72 @@ def render_view_html(obj, kind: str, aspect: str, svg: str,
         'The diagram is an image; the table lists what it shows.</div>'
         '</div></body></html>'
     )
+
+
+# ---------------------------------------------------------------------------
+# View links -- a capability in the URL, because the route cannot authenticate
+# ---------------------------------------------------------------------------
+#
+# FastMCP.custom_route's own docstring says it plainly: "Routes using this
+# decorator will not require authorization." The page is a customer's model
+# content on a public path, so the URL has to carry its own proof.
+#
+# CAPELLA_VIEW_SECRET if set; otherwise one generated per process. A standalone
+# deployment then needs no configuration at all, and its links simply stop
+# working after a restart -- honest, and no weaker, since the session they
+# point into is gone by then anyway.
+#
+# Deliberately NOT CARTENZA_CONNECT_SECRET_KEY. That is a Fernet key for
+# credentials, and reusing one secret for a second purpose is a habit this
+# project has already been bitten by.
+
+VIEW_TTL_SECONDS = 4 * 3600  # matches deploy/cleanup_sessions.sh MAXAGE_HOURS
+
+_VIEW_SECRET = ((os.environ.get('CAPELLA_VIEW_SECRET') or '').strip()
+                or secrets.token_urlsafe(32))
+
+
+def view_token(session_id: str, filename: str, exp: int) -> str:
+    """A token good for exactly one page, in one session, until one moment.
+
+    All three are signed together on purpose: a token handed out for one view
+    cannot be replayed against another file, or against the same filename in
+    somebody else's session.
+    """
+    msg = f'{session_id}|{filename}|{exp}'.encode('utf-8')
+    return hmac.new(_VIEW_SECRET.encode('utf-8'), msg, hashlib.sha256).hexdigest()[:32]
+
+
+def verify_view_token(session_id: str, filename: str, exp: str | int,
+                      token: str) -> bool:
+    """True only for an untampered, unexpired token. Never raises."""
+    try:
+        exp_i = int(exp)
+    except (TypeError, ValueError):
+        return False
+    if not hmac.compare_digest(view_token(session_id, filename, exp_i), token or ''):
+        return False
+    return time.time() < exp_i
+
+
+def servable_view_path(session_id: str, filename: str) -> Path | None:
+    """The file a /view request names, or None if it is not ours to serve.
+
+    The same two guards app.py:/view has used since the feature shipped, in one
+    place now that a second route needs them: the name must be one we generate,
+    and the resolved path must still be inside the session directory, so a
+    crafted name cannot walk out of it.
+    """
+    if not (filename.startswith('view_') and filename.endswith('.html')):
+        return None
+    try:
+        base = _session_dir(session_id).resolve()
+        target = (base / filename).resolve()
+    except Exception:
+        return None
+    if base not in target.parents or not target.exists():
+        return None
+    return target
 
 
 def render_diagram_view(session: dict, target: str, aspect: str = '',

@@ -23,6 +23,8 @@
 import os
 import re
 import sys
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 # Make sure Capella_Tools is importable (mirrors capella_service.py bootstrap)
@@ -32,6 +34,7 @@ if str(_CAPELLA_TOOLS) not in sys.path:
 
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
+from starlette.responses import Response
 import capella_service as svc
 import git_service as git_svc
 
@@ -167,10 +170,12 @@ mcp = FastMCP(
         "BEFORE RENDERING -- the response carries artifact_name, keyed by the element "
         "and the model commit; if an html artifact of that name is already in the "
         "human's workspace repo, the model has not changed and you should just link "
-        "to it. On a miss, call again with include_html=true and write that body as "
-        "an html artifact under artifact_name, then hand over the viewer link. The "
-        "body is withheld by default because a page is 2KB-110KB and belongs in a "
-        "browser, not in the conversation. An element may offer several aspects (a "
+        "to it. Otherwise HAND OVER THE RETURNED url -- a signed link to the page, "
+        "good for about four hours. Never relay the page body: it is 2KB-110KB, a "
+        "44KB one could not be passed into another tool call, and the diagram ended "
+        "up re-described in prose rather than shown (OBS-0023). To preserve a view "
+        "beyond the session, write it as an html artifact under artifact_name and "
+        "hand over that viewer link instead. An element may offer several aspects (a "
         "context view, a realization view across layers) -- aspects_available lists "
         "them, so offer the choice instead of guessing. Some elements have none: a "
         "FunctionalExchange has no generated view, and the error says so. "
@@ -566,6 +571,92 @@ def generate_fabric(session_id: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Serving a rendered view — a URL to hand over, not bytes to relay
+# ---------------------------------------------------------------------------
+#
+# The whole reason this exists: a 44KB page came back inline from
+# include_html=true, the agent could not pass it into another tool call, and
+# fell back to re-describing the diagram in prose -- the exact behaviour the
+# feature was built to replace (Fabric_MCP_Issues/OBS-0023). A link costs a
+# hundred bytes of context and lands the page where it belongs.
+#
+# This route is NOT authenticated -- custom_route cannot be -- so the URL
+# carries a capability token instead (svc.view_token). Everything it can reach
+# is a view_*.html inside one session directory.
+
+# CSP for a page that embeds its SVG as a data-URI <img> and styles inline, and
+# needs nothing else at all. Model text that escaped our escaping still could
+# not phone home from inside this.
+_VIEW_CSP = "default-src 'none'; img-src data:; style-src 'unsafe-inline'"
+
+
+@mcp.custom_route('/view/{session_id}/{filename}', methods=['GET'])
+async def serve_view(request) -> Response:
+    """Serve one rendered view to a browser, on proof of a signed URL.
+
+    Every failure is the same bare 404: a distinct "bad token" and "no such
+    file" would tell someone probing which half they had got right.
+    """
+    session_id = request.path_params['session_id']
+    filename = request.path_params['filename']
+    if not svc.verify_view_token(session_id, filename,
+                                 request.query_params.get('exp', ''),
+                                 request.query_params.get('t', '')):
+        return Response('Not found', status_code=404, media_type='text/plain')
+    target = svc.servable_view_path(session_id, filename)
+    if target is None:
+        return Response('Not found', status_code=404, media_type='text/plain')
+    return Response(
+        target.read_bytes(),
+        media_type='text/html; charset=utf-8',
+        headers={
+            'Content-Security-Policy': _VIEW_CSP,
+            'X-Content-Type-Options': 'nosniff',
+            'Referrer-Policy': 'no-referrer',
+            'Cache-Control': 'private, max-age=300',
+        },
+    )
+
+
+def _public_base_url() -> str:
+    """Where a browser reaches this server, from the request that is in flight.
+
+    CAPELLA_PUBLIC_BASE_URL wins when set, for a deployment fronted by
+    something that rewrites differently. Otherwise it is read off the request:
+    nginx forwards both Host and X-Forwarded-Proto for /mcp and /view alike.
+
+    Trusting the Host header is safe HERE specifically: FastMCP's DNS-rebinding
+    protection rejects a host that is not in allowed_hosts above, with a 421,
+    before this code runs at all. A forged Host never reaches a tool.
+    """
+    configured = os.environ.get('CAPELLA_PUBLIC_BASE_URL', '').strip().rstrip('/')
+    if configured:
+        return configured
+    try:
+        request = mcp.get_context().request_context.request
+        host = request.headers.get('host', '')
+        if not host:
+            return ''
+        # Chained proxies append rather than replace, so this can be a list.
+        fwd = request.headers.get('x-forwarded-proto', '').split(',')[0].strip()
+        scheme = fwd or request.url.scheme
+        return f'{scheme}://{host}'
+    except Exception:
+        return ''
+
+
+def _view_url(session_id: str, path: str) -> tuple[str, int] | tuple[None, None]:
+    """An absolute, signed, expiring URL for a page already on disk."""
+    base = _public_base_url()
+    if not base:
+        return None, None
+    filename = Path(path).name
+    exp = int(time.time()) + svc.VIEW_TTL_SECONDS
+    token = svc.view_token(session_id, filename, exp)
+    return f'{base}/view/{session_id}/{filename}?exp={exp}&t={token}', exp
+
+
+# ---------------------------------------------------------------------------
 # Tool — Render a view of the model for the human to LOOK at
 # ---------------------------------------------------------------------------
 
@@ -585,20 +676,31 @@ def render_diagram_view(
     no authored diagram shows that element well, which is the usual case for a
     single component someone is asking about.
 
-    CHECK BEFORE YOU RENDER. The response carries `artifact_name`, keyed by the
-    element and the model's commit. If an html artifact of that name already
+    HAND OVER `url`. The response carries a ready-made link to the rendered
+    page, signed and good for about four hours. Give it to the human as a
+    markdown link and stop -- that is the whole delivery. The page itself is
+    2KB-110KB and must never travel through the conversation: a 44KB page was
+    relayed once, could not be passed into another tool call, and the view ended
+    up being re-described in prose instead of shown
+    (Fabric_MCP_Issues/OBS-0023).
+
+    CHECK BEFORE YOU RENDER. The response also carries `artifact_name`, keyed by
+    the element and the model's commit. If an html artifact of that name already
     exists in the human's workspace repo, the view has been made before and the
     model has not changed since: just generate a viewer link for it and stop.
     Rendering again costs time and tokens and produces an identical page.
 
-    On a miss, call with include_html=true and write the returned `html` as an
-    html artifact under `artifact_name`, then hand over its viewer link. Without
-    include_html the body is not returned at all -- a page is 2KB-110KB and
-    belongs in the human's browser, not in this conversation.
+    To PRESERVE a view beyond the session, write it as an html artifact under
+    `artifact_name` and hand over that viewer link instead -- the `url` here
+    dies with the session, by design, because it is a conversational handoff.
+
+    include_html=true returns the body, for the rare case where you must have
+    the bytes in hand. Check `bytes` first: anything above a few KB cannot be
+    relayed, and asking for it wastes the human's context for nothing.
 
     Running this server standalone, with no Cartenza workspace to write to:
-    ignore artifact_name and give the human the `path`; the page is complete on
-    its own and needs nothing else to open.
+    ignore artifact_name; `url` is the handoff, or `path` to open the file
+    directly. The page is complete on its own and needs nothing else.
 
     An element may support more than one aspect -- typically a context view and
     a realization view across layers. `aspects_available` lists what this one
@@ -610,12 +712,20 @@ def render_diagram_view(
         session_id:   Session ID returned by clone_capella_repo
         target:       uuid or name of a model element, or of an existing diagram
         aspect:       which view, when the element offers several; omit for its default
-        include_html: return the page body, for writing it as an artifact
+        include_html: return the page body too; prefer the returned url
     """
     try:
         session = svc.load_session(session_id)
         commit = _head_summary(session_id).get("commit", "") or ""
         result = svc.render_diagram_view(session, target, aspect=aspect, commit=commit)
+        # The link is the deliverable (OBS-0023). It is absent only when the
+        # public base URL cannot be determined -- running over stdio, say --
+        # and then `path` is still the handoff it always was.
+        url, exp = _view_url(session_id, result["path"])
+        if url:
+            result["url"] = url
+            result["url_expires_at"] = datetime.fromtimestamp(
+                exp, timezone.utc).isoformat(timespec="seconds")
         if include_html:
             result["html"] = Path(result["path"]).read_text(encoding="utf-8")
         return result

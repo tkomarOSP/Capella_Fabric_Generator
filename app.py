@@ -318,17 +318,14 @@ def view_page(session_id, filename):
     this route is the whole of what they get -- and it has to open in a
     browser, which /download does not, because it sends an attachment.
 
-    Only files this app generated are servable: the name must match the
-    view_*.html pattern and resolve inside the session directory, so a
-    crafted filename cannot walk out of it.
+    Only files this app generated are servable -- the name must match the
+    view_*.html pattern and resolve inside the session directory, so a crafted
+    filename cannot walk out of it. That check is svc.servable_view_path, shared
+    with the MCP server's own /view route so the two cannot drift apart.
     """
-    if not (filename.startswith('view_') and filename.endswith('.html')):
-        flash('Not a rendered view.')
-        return redirect(url_for('index'))
     try:
-        base = svc._session_dir(session_id).resolve()
-        target = (base / filename).resolve()
-        if base not in target.parents or not target.exists():
+        target = svc.servable_view_path(session_id, filename)
+        if target is None:
             flash('View not available — please generate it again.')
             return redirect(url_for('index'))
         return send_file(target, mimetype='text/html')

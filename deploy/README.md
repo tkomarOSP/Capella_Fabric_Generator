@@ -260,6 +260,14 @@ nginx -t
 systemctl reload nginx
 ```
 
+The config proxies **two** locations to port 8001, and both are required:
+
+- `/mcp` — the Streamable HTTP endpoint every client talks to.
+- `/view` — rendered diagram pages, handed to a human as a signed link
+  (see *Rendered view links* below). Without this block, `render_diagram_view`
+  still works and still returns a URL, and that URL 404s from nginx — which
+  looks exactly like a code fault and is not one.
+
 At this point the server is reachable over HTTP only. Proceed to get SSL before connecting any client.
 
 ---
@@ -315,6 +323,36 @@ chmod 644 /etc/cron.d/capella-sessions
 
 Cleanup activity is logged to `/var/log/capella-fabric/session-cleanup.log`.
 To adjust the TTL, edit `MAXAGE_HOURS` in `deploy/cleanup_sessions.sh`.
+
+---
+
+### MCP 5b. Rendered view links
+
+`render_diagram_view` writes a self-contained HTML page into the session
+directory and returns a **signed URL** to it, so an agent hands the human a
+link instead of trying to relay the page body through the conversation. (It
+tried that once: a 44 KB page could not be passed into another tool call and
+the diagram ended up re-described in prose —
+`After_Treatment_System_Notebook/Fabric_MCP_Issues` OBS-0023.)
+
+Two optional environment variables, both of which can stay unset:
+
+| Variable | Default | Why you might set it |
+|---|---|---|
+| `CAPELLA_VIEW_SECRET` | a fresh random value per process | Keeps existing links working across a restart. Unset is fine and no weaker — the session a link points into is gone by then anyway. |
+| `CAPELLA_PUBLIC_BASE_URL` | taken from the request's `Host` + `X-Forwarded-Proto` | Only for a deployment fronted by something that rewrites those differently. |
+
+Two things worth knowing before debugging a dead link:
+
+- **A link dies with its session.** `MAXAGE_HOURS=4` in
+  `deploy/cleanup_sessions.sh` removes the whole session directory, the
+  rendered page with it, and the token's own expiry matches. A four-hour-old
+  link 404ing is the design, not a fault. To keep a view, write it as an `html`
+  artifact in the member's workspace repo and link to that instead.
+- **The route is unauthenticated, and has to be.** FastMCP's `custom_route`
+  cannot require authorization, so the capability is in the URL: an HMAC over
+  session id, filename and expiry. It reaches nothing but a `view_*.html`
+  inside that one session directory, and every rejection is the same bare 404.
 
 ---
 
@@ -448,6 +486,12 @@ from the running kp-connect unit rather than generating a new one.
 
 `www-data` also needs read/write on `CARTENZA_DB_PATH` and its directory (SQLite
 writes a `-wal`/`-shm` sibling next to the file).
+
+`CAPELLA_VIEW_SECRET` can go in this file too if you want view links to survive
+a restart (see *MCP 5b*). It is independent of
+`CARTENZA_CONNECT_SECRET_KEY` on purpose and must not be set to the same value —
+that one is a Fernet key for credentials, and one secret per purpose is the rule
+this project keeps relearning.
 
 ### C3. nginx and DNS
 

@@ -240,5 +240,164 @@ for forbidden in ("auth.", "_AUTH_AVAILABLE", "api_key", "kp_auth"):
     assert forbidden not in seg, "render_diagram_view reaches for auth: " + forbidden
 print("standalone-safe:   the renderer touches no auth path")
 
+# ===== 10. The Cartenza handoff: a signed URL, not 44KB of base64 =====
+# The feature shipped telling an agent to relay the page body. A 44KB page came
+# back, could not be passed into another tool call, and the diagram was
+# re-described in prose instead of shown -- the exact behaviour this feature
+# exists to replace (Fabric_MCP_Issues/OBS-0023). So the handoff is a link now,
+# and this section tests the route that actually serves it rather than a copy of
+# it: the real Starlette app from mcp.streamable_http_app().
+import importlib
+import time
+
+os.environ["CAPELLA_VIEW_SECRET"] = "test-only-not-a-real-secret"
+import capella_service
+
+importlib.reload(capella_service)   # the secret is read once, at import
+svc = capella_service
+import mcp_server as M
+
+from starlette.testclient import TestClient
+
+r_url = svc.render_diagram_view(SESSION, str(comp.uuid), commit=COMMIT)
+view_file = Path(r_url["path"])
+view_name = view_file.name
+EXP = int(time.time()) + 600
+TOK = svc.view_token(SID, view_name, EXP)
+
+HOST = "dev.capella.cartenza.ai"
+with TestClient(M.mcp.streamable_http_app(), base_url="https://" + HOST) as client2:
+    url = "/view/" + SID + "/" + view_name
+
+    resp = client2.get(url, params={"exp": EXP, "t": TOK})
+    assert resp.status_code == 200, resp.status_code
+    assert resp.headers["content-type"].startswith("text/html"), resp.headers["content-type"]
+    # Byte-identical, because the point is that the browser gets the page the
+    # renderer wrote -- not a re-encoded approximation of it.
+    assert resp.content == view_file.read_bytes(), "served bytes differ from the written page"
+    assert resp.headers["x-content-type-options"] == "nosniff"
+    csp = resp.headers["content-security-policy"]
+    # The page embeds its SVG as a data-URI <img> and styles inline, and needs
+    # nothing else at all -- so model text that ever escaped our escaping still
+    # could not reach the network from inside this.
+    assert "default-src 'none'" in csp and "img-src data:" in csp, csp
+    print("signed url:        200 text/html, byte-identical, CSP + nosniff")
+
+    # Every rejection is the same bare 404. A distinct "bad token" and "no such
+    # file" would tell a prober which half they had got right.
+    bad = {
+        "no token":        {"exp": EXP},
+        "tampered token":  {"exp": EXP, "t": "0" * 32},
+        "tampered expiry": {"exp": EXP + 86400, "t": TOK},
+        "expired":         {"exp": int(time.time()) - 1,
+                            "t": svc.view_token(SID, view_name, int(time.time()) - 1)},
+    }
+    for label, params in bad.items():
+        r = client2.get(url, params=params)
+        assert r.status_code == 404, (label, r.status_code)
+        assert b"<!doctype" not in r.content.lower(), label
+    print("rejected:          " + ", ".join(bad) + " -- all 404, all alike")
+
+    # A token is bound to session AND filename together, so it cannot be
+    # replayed sideways onto another page or another session's page.
+    other_sid = SID + "-2"
+    Path(svc._session_dir(other_sid)).mkdir(parents=True, exist_ok=True)
+    (Path(svc._session_dir(other_sid)) / view_name).write_text("secret", encoding="utf-8")
+    r = client2.get("/view/" + other_sid + "/" + view_name, params={"exp": EXP, "t": TOK})
+    assert r.status_code == 404, r.status_code
+    assert b"secret" not in r.content
+    print("not transferable:  another session's page with this token -- 404")
+
+    # The filename guard still applies after the token check passes, so a
+    # correctly-signed request for something that is not a rendered view fails.
+    for name in ("session.json", "upload.zip", "view_nope.html"):
+        r = client2.get("/view/" + SID + "/" + name,
+                        params={"exp": EXP, "t": svc.view_token(SID, name, EXP)})
+        assert r.status_code == 404, (name, r.status_code)
+        assert b"aird_path" not in r.content, name
+    r = client2.get("/view/" + SID + "/..%2f..%2fview_x.html",
+                    params={"exp": EXP, "t": TOK})
+    assert r.status_code == 404, r.status_code
+    print("guard holds:       a signed request for a non-view is still 404")
+
+
+# The absolute URL is built from the request, with no new configuration: nginx
+# forwards Host and X-Forwarded-Proto. Trusting Host is safe HERE only because
+# allowed_hosts 421s a forged one before any of this code runs.
+class _FakeReq:
+    def __init__(self, headers):
+        self.headers = headers
+        self.url = type("U", (), {"scheme": "http"})()
+
+
+class _FakeCtx:
+    def __init__(self, req):
+        self.request_context = type("R", (), {"request": req})()
+
+
+_real_get_context = M.mcp.get_context
+os.environ.pop("CAPELLA_PUBLIC_BASE_URL", None)
+M.mcp.get_context = lambda: _FakeCtx(_FakeReq(
+    {"host": HOST, "x-forwarded-proto": "https"}))
+built, exp2 = M._view_url(SID, str(view_file))
+assert built.startswith("https://" + HOST + "/view/" + SID + "/" + view_name), built
+assert "exp=" in built and "t=" in built
+assert exp2 - time.time() > 3 * 3600, "a link should outlast a working session"
+assert svc.verify_view_token(SID, view_name, exp2, built.split("t=")[1])
+print("url from request:  https://" + HOST + "/view/... (X-Forwarded-Proto honoured)")
+
+# Behind something that rewrites differently, the override wins.
+os.environ["CAPELLA_PUBLIC_BASE_URL"] = "https://capella.example.test/"
+built2, _ = M._view_url(SID, str(view_file))
+assert built2.startswith("https://capella.example.test/view/"), built2
+os.environ.pop("CAPELLA_PUBLIC_BASE_URL")
+print("override:          CAPELLA_PUBLIC_BASE_URL takes precedence")
+
+# No base URL discoverable (stdio, say) -- no url, nothing raised, and `path`
+# is still the standalone handoff it always was.
+M.mcp.get_context = lambda: (_ for _ in ()).throw(RuntimeError("no request"))
+assert M._view_url(SID, str(view_file)) == (None, None)
+M.mcp.get_context = _real_get_context
+print("no request:        no url, and nothing raised")
+
+# The TOOL must actually put the url in its result. The route working and the
+# tool returning the link are two different things, and shipping the first
+# without the second is how OBS-0023 happened in the first place.
+M.mcp.get_context = lambda: _FakeCtx(_FakeReq(
+    {"host": HOST, "x-forwarded-proto": "https"}))
+M._head_summary = lambda _sid: {"commit": COMMIT}
+svc.save_session(SID, SESSION)
+tool_result = M.render_diagram_view(SID, str(comp.uuid))
+assert "error" not in tool_result, tool_result
+assert tool_result["url"].startswith("https://" + HOST + "/view/"), tool_result.get("url")
+assert tool_result["url_expires_at"].endswith("+00:00"), tool_result["url_expires_at"]
+assert "html" not in tool_result, "the body must stay out unless asked for"
+with_body = M.render_diagram_view(SID, str(comp.uuid), include_html=True)
+assert with_body["html"].lstrip().startswith("<!doctype html>")
+M.mcp.get_context = _real_get_context
+print("tool returns url:  " + tool_result["url_expires_at"] + ", body withheld by default")
+
+# ===== 11. A standalone deployment configures nothing =====
+# The easiest case to leave untested: with no CAPELLA_VIEW_SECRET set, the
+# server makes its own per-process one. Links then die on restart, which is
+# honest -- the session they point into is gone by then anyway. Checked in a
+# subprocess because the secret is read once, at import.
+probe = (
+    "import os,sys,time;"
+    "os.environ.pop('CAPELLA_VIEW_SECRET',None);"
+    "sys.path.insert(0,r'" + TOOLS + "');"
+    "sys.path.insert(0,r'" + FABRIC + "');"
+    "import capella_service as s;"
+    "e=int(time.time())+60;"
+    "t=s.view_token('sid','view_a.html',e);"
+    "assert s.verify_view_token('sid','view_a.html',e,t);"
+    "assert not s.verify_view_token('sid','view_b.html',e,t);"
+    "assert len(s._VIEW_SECRET)>20;"
+    "print('ok')"
+)
+out = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True)
+assert out.returncode == 0 and out.stdout.strip() == "ok", (out.stdout, out.stderr[-600:])
+print("standalone:        unconfigured, it signs with a per-process secret")
+
 print("")
 print("ALL DIAGRAM VIEW CHECKS PASSED")
