@@ -174,8 +174,18 @@ mcp = FastMCP(
         "good for about four hours. Never relay the page body: it is 2KB-110KB, a "
         "44KB one could not be passed into another tool call, and the diagram ended "
         "up re-described in prose rather than shown (OBS-0023). To preserve a view "
-        "beyond the session, write it as an html artifact under artifact_name and "
-        "hand over that viewer link instead. An element may offer several aspects (a "
+        "beyond the session, write it as an html artifact and hand over THAT viewer "
+        "link instead: on Cartenza, workspace-manager's write_workspace_artifact with "
+        "source_url=the url (it fetches the page itself, so the bytes never cross the "
+        "conversation), then generate_artifact_viewer_link for a link that does not "
+        "expire. artifact_name is \"<package>/<name>\" -- split it on the slash, so the "
+        "package is capella_views and the name is the rest; keeping that split "
+        "consistent is what lets the check above find it again. "
+        "If the human PASTES a diagram image, treat it as a selector rather than "
+        "content: read the title off the image and render that diagram from the model. "
+        "The rendered page carries full resolution, an element table with uuids and the "
+        "model commit, none of which a screenshot has, and the pasted image itself "
+        "cannot be preserved at all -- the artifact pipeline is text only. An element may offer several aspects (a "
         "context view, a realization view across layers) -- aspects_available lists "
         "them, so offer the choice instead of guessing. Some elements have none: a "
         "FunctionalExchange has no generated view, and the error says so. "
@@ -679,6 +689,15 @@ def render_diagram_view(
     no authored diagram shows that element well, which is the usual case for a
     single component someone is asking about.
 
+    A PASTED DIAGRAM IMAGE IS A SELECTOR, NOT CONTENT. When the human pastes a
+    screenshot of a diagram, read its title off the image and resolve that as
+    `target` rather than describing the picture back to them. The rendered page
+    is strictly better than the paste for every later purpose: full resolution,
+    an element table with uuids, and the model commit it was drawn from, which
+    a screenshot can never carry. Nothing can preserve the pasted image itself
+    -- the artifact pipeline is text only -- so re-rendering is also the only
+    route to keeping it.
+
     HAND OVER `url`. The response carries a ready-made link to the rendered
     page, signed and good for about four hours. Give it to the human as a
     markdown link and stop -- that is the whole delivery. The page itself is
@@ -693,9 +712,15 @@ def render_diagram_view(
     model has not changed since: just generate a viewer link for it and stop.
     Rendering again costs time and tokens and produces an identical page.
 
-    To PRESERVE a view beyond the session, write it as an html artifact under
-    `artifact_name` and hand over that viewer link instead -- the `url` here
-    dies with the session, by design, because it is a conversational handoff.
+    To PRESERVE a view beyond the session, write it as an html artifact and
+    hand over that viewer link instead -- the `url` here dies with the session,
+    by design, because it is a conversational handoff. On Cartenza that is
+    workspace-manager: `write_workspace_artifact(source_url=url, ...)`, which
+    fetches the page itself so it never crosses the conversation, then
+    `generate_artifact_viewer_link` for a link that does not expire.
+    `artifact_name` is "<package>/<name>" -- split it on the slash, so the
+    package is `capella_views` and the name is the rest. Keeping that split
+    consistent is what lets the CHECK below find it again next time.
 
     include_html=true returns the body, for the rare case where you must have
     the bytes in hand. Check `bytes` first: anything above a few KB cannot be
