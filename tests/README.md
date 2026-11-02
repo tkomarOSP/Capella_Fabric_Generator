@@ -20,5 +20,15 @@ Model-backed tests read Trail Power from `Capella_Tools`, and the context-diagra
 tests need the ELK layout binary — see `deploy/README.md` §4b. Without it the
 first render downloads it (~20s) rather than failing.
 
+**`test_diagram_views.py` takes about two minutes, and that is deliberate.** It
+renders every authored diagram in Trail Power — 88 of them — rather than a
+representative one. Two shipped defects hid behind a single-diagram test: the
+element table listing 54 ports (the one component checked was at the logical
+layer, which draws no ports) and 12 diagrams failing to render at all (the one
+diagram checked was not a PAB). The sweep renders straight off the already-open
+model rather than through `render_diagram_view`, which reloads the model per
+call; going through the tool took 12.6 minutes. Narrow it again and you lose
+exactly the coverage that caught those two.
+
 These were recovered from a `%TEMP%` scratchpad that Windows was deleting
 piecemeal; see `se-knowledge-partner/tests/README.md`.

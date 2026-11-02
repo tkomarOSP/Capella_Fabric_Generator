@@ -529,13 +529,19 @@ print("standalone:        unconfigured, it signs with a per-process secret")
 # Checked over the WHOLE model rather than one diagram. Picking one diagram is
 # exactly what hid the port bug and this one: section 4 renders a single
 # LogicalComponent and was green throughout both.
+# Rendered off the model that is already open, NOT through
+# render_diagram_view: that reloads the model on every call, so sweeping 88
+# diagrams through it took 12.6 minutes for this one file. The sweep proves the
+# renderer copes with every diagram; the three named cases below go through the
+# real tool and prove the wiring, and they fail outright if stored_layout() is
+# ever dropped from it.
 _failed = []
 for _d in model.diagrams:
     try:
-        _s = svc.render_diagram_view(SESSION, str(_d.uuid), commit=COMMIT)
-        _page = Path(_s["path"]).read_text(encoding="utf-8")
-        assert "data:image/svg+xml;base64," in _page, _d.name
-        assert _s["layout"] == "stored", (_d.name, _s["layout"])
+        with svc.stored_layout():
+            _svg = _d.render("svg")
+        assert "<svg" in _svg and "viewBox" in _svg, _d.name
+        assert len(_svg) > 300, (_d.name, len(_svg))
     except Exception as _exc:
         _failed.append((_d.name, type(_exc).__name__, str(_exc)[:70]))
 
@@ -557,6 +563,9 @@ for _prefix, _why in _named.items():
     assert _hit, "this model no longer has a diagram named " + _prefix
     _r = svc.render_diagram_view(SESSION, str(_hit[0].uuid), commit=COMMIT)
     assert _r["bytes"] > 400, (_prefix, _r["bytes"])
+    assert _r["layout"] == "stored", (_prefix, _r["layout"])
+    assert "data:image/svg+xml;base64," in Path(
+        _r["path"]).read_text(encoding="utf-8"), _prefix
     print("  recovered: %-22s %s" % (_prefix, _why))
 
 # The page says so, because a stored endpoint may not quite touch its box and
