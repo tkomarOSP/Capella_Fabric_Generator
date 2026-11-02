@@ -519,5 +519,100 @@ out = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=Tr
 assert out.returncode == 0 and out.stdout.strip() == "ok", (out.stdout, out.stderr[-600:])
 print("standalone:        unconfigured, it signs with a per-process secret")
 
+# ===== 13. EVERY authored diagram renders, not just the one I picked =====
+# Reported from After_Treatment_System: PAB diagrams failing with
+# "(Vector2D(...), Vector2D(...)) doesn't intersect {'top', 'right'}". It
+# reproduces here and is wider than reported -- 12 of Trail Power's 88 authored
+# diagrams, 9 of them PAB -- because capellambse re-derives where each edge
+# meets its box and asserts when the computation misses.
+#
+# Checked over the WHOLE model rather than one diagram. Picking one diagram is
+# exactly what hid the port bug and this one: section 4 renders a single
+# LogicalComponent and was green throughout both.
+_failed = []
+for _d in model.diagrams:
+    try:
+        _s = svc.render_diagram_view(SESSION, str(_d.uuid), commit=COMMIT)
+        _page = Path(_s["path"]).read_text(encoding="utf-8")
+        assert "data:image/svg+xml;base64," in _page, _d.name
+        assert _s["layout"] == "stored", (_d.name, _s["layout"])
+    except Exception as _exc:
+        _failed.append((_d.name, type(_exc).__name__, str(_exc)[:70]))
+
+assert not _failed, (
+    "%d of %d authored diagrams failed to render: %r"
+    % (len(_failed), len(model.diagrams), _failed[:4]))
+print("every diagram:     " + str(len(model.diagrams))
+      + " authored diagrams render, none failed")
+
+# The two shapes of the reported failure, named so a regression is legible
+# rather than just a count going up.
+_named = {
+    "[PAB] Structure": "the plain snapping assert",
+    "Demo 2[PAB]": "two points 2e-12 apart -- a degenerate segment",
+    "[LDFB] Convert Light": "svgwrite refusing rx on a <use>",
+}
+for _prefix, _why in _named.items():
+    _hit = [d for d in model.diagrams if d.name.startswith(_prefix)]
+    assert _hit, "this model no longer has a diagram named " + _prefix
+    _r = svc.render_diagram_view(SESSION, str(_hit[0].uuid), commit=COMMIT)
+    assert _r["bytes"] > 400, (_prefix, _r["bytes"])
+    print("  recovered: %-22s %s" % (_prefix, _why))
+
+# The page says so, because a stored endpoint may not quite touch its box and
+# someone looking at a gap should know it is the model's geometry, not a bug.
+_r = svc.render_diagram_view(SESSION, str(model.diagrams[0].uuid), commit=COMMIT)
+_page = Path(_r["path"]).read_text(encoding="utf-8")
+assert "Positions are the ones saved in the model" in _page
+_ctx = svc.render_diagram_view(SESSION, str(comp.uuid), commit=COMMIT)
+assert _ctx["layout"] == "computed", _ctx["layout"]
+assert "Positions are the ones saved in the model" not in Path(
+    _ctx["path"]).read_text(encoding="utf-8"), "a generated view claimed a stored layout"
+print("disclosed:         footer note on authored pages only, layout reported")
+
+# ===== 14. The switch does not leak into generated views =====
+# stored_layout() flips process-global state, so the real risk is not that
+# authored diagrams stay broken -- it is that context diagrams quietly change.
+# These three PA components have ports and are the ones that DO move when
+# snapping is off, so they are the guard; the hashes are the measured
+# with-snapping baseline.
+import hashlib
+
+_BASELINE = {
+    "Physical System": "c74377f08e",
+    "Trail Power": "4013cf3198",
+    "Telemetry Box": "dc848ff84e",
+}
+for _name, _want in _BASELINE.items():
+    _c = [c for c in model.search("PhysicalComponent") if (c.name or "") == _name]
+    assert _c, "this model no longer has a PhysicalComponent named " + _name
+    _got = hashlib.sha1(
+        _c[0].context_diagram.render("svg").encode("utf-8")).hexdigest()[:10]
+    assert _got == _want, (
+        "%s context diagram changed: %s, baseline %s -- the stored-layout "
+        "switch has leaked into generated views" % (_name, _got, _want))
+print("no leak:           " + str(len(_BASELINE))
+      + " PA context diagrams byte-identical to the snapped baseline")
+
+# And the flags come back, including when the render raises. The finally is the
+# part that rots silently: nothing else here would notice it missing.
+from capellambse import diagram as _dpkg
+from capellambse.diagram import _diagram as _dmod
+import svgwrite.params
+
+_before = (_dpkg.SNAPPING, _dmod.SNAPPING, svgwrite.params.Parameter.debug)
+assert _dpkg.SNAPPING and _dmod.SNAPPING, "snapping was left off"
+try:
+    with svc.stored_layout():
+        assert not _dpkg.SNAPPING and not _dmod.SNAPPING, "the switch did nothing"
+        assert svgwrite.params.Parameter("x").debug is False
+        raise RuntimeError("boom")
+except RuntimeError:
+    pass
+_after = (_dpkg.SNAPPING, _dmod.SNAPPING, svgwrite.params.Parameter.debug)
+assert _before == _after, (_before, _after)
+assert svgwrite.params.Parameter().debug is True, "validation stayed off"
+print("restored:          both flags and the debug property, even on a raise")
+
 print("")
 print("ALL DIAGRAM VIEW CHECKS PASSED")

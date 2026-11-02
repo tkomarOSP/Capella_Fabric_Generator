@@ -179,6 +179,9 @@ mcp = FastMCP(
         "context view, a realization view across layers) -- aspects_available lists "
         "them, so offer the choice instead of guessing. Some elements have none: a "
         "FunctionalExchange has no generated view, and the error says so. "
+        "An existing diagram is drawn from the layout saved in the model, so it "
+        "matches what someone laid out in Capella; a generated view is laid out "
+        "fresh. The response says which, as layout=stored or layout=computed. "
         "generate_fabric also folds in PUBLISHED REQUIREMENTS automatically when the repo carries "
         "a <model>.traceability file beside the .aird -- written by Publication for Capella, "
         "typically linking model elements to Polarion work items. Those appear in the YAML as "
@@ -701,6 +704,10 @@ def render_diagram_view(
     Running this server standalone, with no Cartenza workspace to write to:
     ignore artifact_name; `url` is the handoff, or `path` to open the file
     directly. The page is complete on its own and needs nothing else.
+
+    An existing diagram is drawn from the positions saved in the model, so the
+    picture matches what someone laid out in Capella. `layout` says which was
+    used: "stored" for an authored diagram, "computed" for a generated view.
 
     An element may support more than one aspect -- typically a context view and
     a realization view across layers. `aspects_available` lists what this one
