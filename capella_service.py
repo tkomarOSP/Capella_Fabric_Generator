@@ -586,6 +586,28 @@ def _is_package(obj) -> bool:
     return name.endswith("Pkg") or name == "CapellaModule"
 
 
+def _is_port(obj) -> bool:
+    """True for a port, which a diagram draws but a reader does not want listed.
+
+    A PA-layer context diagram's nodes are mostly ports: the AFT Canister's own
+    shows 54 PhysicalPorts around 12 PhysicalComponents, named 'PP 2', 'PP 3',
+    'PP 21' and repeating, because a port's name is only meaningful beside its
+    owner. Listing them buries the twelve components that are the actual answer
+    under four times their volume of noise.
+
+    Found on the deployed server against After_Treatment_System, not locally:
+    the test model's context diagram is at the LOGICAL layer, which draws no
+    ports at all, so every local run showed a clean list. The layer, not the
+    code, was what differed.
+
+    Matched on the class-name suffix rather than a fixed list, because the
+    families are PhysicalPort, ComponentPort, FunctionInputPort,
+    FunctionOutputPort and ComponentExchange's own port types -- an explicit
+    list would silently miss whichever one a new model uses.
+    """
+    return type(obj).__name__.endswith('Port')
+
+
 def _object_info(obj) -> dict:
     type_name = obj.__class__.__name__
     info = {
@@ -1062,6 +1084,8 @@ def render_diagram_view(session: dict, target: str, aspect: str = '',
             element = getattr(n, 'target', None) or n
             if getattr(element, 'uuid', None) is None:
                 continue
+            if _is_port(element):
+                continue
             try:
                 out.append(_object_info(element))
             except Exception:
@@ -1121,7 +1145,14 @@ def render_diagram_view(session: dict, target: str, aspect: str = '',
     out_dir.mkdir(parents=True, exist_ok=True)
     safe = re.sub(r'[^A-Za-z0-9._-]', '_', f"{getattr(obj, 'uuid', target)}__{chosen}")
     out_path = out_dir / f'view_{safe}.html'
-    out_path.write_text(page, encoding='utf-8')
+    # newline='' so the bytes on disk are the bytes we built, on every
+    # platform. Without it Windows rewrites each line ending on the way out,
+    # and the file is then larger than the 'bytes' we report and than what
+    # the /view route serves -- 13861 on disk against 13840 reported,
+    # measured. An HTML page is happy with LF, and a page that is
+    # byte-identical everywhere is one fewer thing that behaves differently
+    # on the droplet than on a laptop.
+    out_path.write_text(page, encoding='utf-8', newline='')
 
     return {
         'path': str(out_path),
@@ -1129,7 +1160,12 @@ def render_diagram_view(session: dict, target: str, aspect: str = '',
         'aspect': chosen,
         'aspects_available': available_aspects(obj) if kind == 'element' else ['diagram'],
         'name': getattr(obj, 'name', '') or '',
-        'bytes': len(page),
+        # The page is written as UTF-8, so its length in CHARACTERS is not its
+        # length on the wire -- 52814 against 52819 for the AFT Canister, the
+        # difference being a few non-ASCII characters in model text. A field
+        # named 'bytes' that an agent is told to check before relaying should
+        # be the number that decides whether relaying is possible.
+        'bytes': len(page.encode('utf-8')),
         'elements': len(shown),
         'artifact_name': (f'capella_views/{safe}__{commit[:7]}.html' if commit else None),
     }

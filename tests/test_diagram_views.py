@@ -151,6 +151,10 @@ _diag.render("svg")
 # as a second bug; it was the same one, in the test.
 _nodes = [getattr(n, "target", None) or n for n in _diag.nodes]
 _nodes = [n for n in _nodes if getattr(n, "uuid", None) is not None]
+# Ports are drawn but not listed -- see _is_port. This model's context diagram
+# is at the LOGICAL layer and has none, which is exactly why the port bug
+# survived every local run; section 4b below covers the physical layer.
+_nodes = [n for n in _nodes if not svc._is_port(n)]
 assert r_el["elements"] == len(_nodes),     f"reported {r_el['elements']} elements, the diagram shows {len(_nodes)}"
 assert r_el["elements"] > 1,     "this component's context diagram has neighbours -- a count of 1 is the old bug"
 _page = Path(r_el["path"]).read_text(encoding="utf-8")
@@ -162,6 +166,52 @@ print("elements listed:   " + str(r_el["elements"]) + " of " + str(len(_nodes))
       + " diagram nodes, each named on the page")
 print("element view:      " + r_el["aspect"] + ", " + str(r_el["bytes"]) + "B, aspects="
       + repr(r_el["aspects_available"]))
+
+# ===== 4b. The physical layer, where the nodes are mostly ports =====
+# Found on the deployed server, not here: the AFT Canister's context diagram
+# listed 54 PhysicalPorts around 12 PhysicalComponents -- 'PP 2', 'PP 3', 'PP
+# 21', repeating, because a port's name only means anything beside its owner.
+# The twelve components that were the actual answer sat under four times their
+# own volume of noise. Nothing local caught it because the component used above
+# is a LogicalComponent and the logical layer draws no ports at all. The layer
+# differed, not the code, so the fix is only honestly tested at PA.
+_pa = [c for c in model.search("PhysicalComponent")
+       if "context_diagram" in svc.available_aspects(c)]
+assert _pa, "this model has no PhysicalComponent with a context view to check"
+
+_checked = 0
+for _comp in _pa:
+    _d = getattr(_comp, "context_diagram")
+    _d.render("svg")
+    _raw = [getattr(n, "target", None) or n for n in _d.nodes]
+    _raw = [n for n in _raw if getattr(n, "uuid", None) is not None]
+    _ports = [n for n in _raw if svc._is_port(n)]
+    if not _ports:
+        continue                      # no ports drawn here; nothing to prove
+    _r = svc.render_diagram_view(SESSION, str(_comp.uuid), commit=COMMIT)
+    _kept = [n for n in _raw if not svc._is_port(n)]
+    assert _r["elements"] == len(_kept), (_r["elements"], len(_kept))
+    assert _r["elements"] < len(_raw), "ports are still being counted"
+    # And they are not on the page either, which is where they were noticed.
+    _pg = Path(_r["path"]).read_text(encoding="utf-8")
+    assert "PhysicalPort" not in _pg, "a port is still listed on the page"
+    _checked += 1
+    print("ports excluded:    " + (_comp.name or "?")[:22] + ": "
+          + str(len(_raw)) + " nodes -> " + str(_r["elements"]) + " listed, "
+          + str(len(_ports)) + " ports dropped")
+    break
+
+if not _checked:
+    print("ports excluded:    (no port-bearing context view in this model)")
+
+# `bytes` must be bytes. It read len(page) on a str, so it was a CHARACTER
+# count -- 52814 against 52819 for the AFT Canister. Small, and the field is
+# named bytes and the tool tells an agent to check it before relaying, so the
+# number has to be the one that decides whether relaying is possible.
+_r = svc.render_diagram_view(SESSION, str(comp.uuid), commit=COMMIT)
+_disk = Path(_r["path"]).read_bytes()
+assert _r["bytes"] == len(_disk), (_r["bytes"], len(_disk))
+print("bytes is bytes:    " + str(_r["bytes"]) + " == the file on disk")
 
 diag = model.diagrams[0]
 r_dg = svc.render_diagram_view(SESSION, diag.name, commit=COMMIT)
