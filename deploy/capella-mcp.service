@@ -14,14 +14,23 @@ Environment="CAPELLA_TOOLS_PATH=/opt/capella_tools"
 # GitHub, or fails. Pointing it at a directory www-data owns makes the
 # deploy-time pre-fetch (deploy/README.md 4b) actually take effect.
 Environment="XDG_CACHE_HOME=/var/lib/capella-fabric/cache"
-# Cartenza co-deploy only (note-0086). Absent on the standalone droplet, where
-# kp-auth isn't installed and github_pat is passed directly -- the server runs
-# fine with none of these set. On the Cartenza droplet this file must supply:
-#   CARTENZA_DB_PATH             same SQLite file the other Cartenza services use
-#   CARTENZA_CONNECT_SECRET_KEY  MUST match kp-connect's byte for byte, or
-#                                decryption fails silently at redeem time, not
-#                                at startup (kp/auth/secrets.py:23-40)
-#   KP_CONNECT_BASE_URL          e.g. https://connect.cartenza.ai
+# Cartenza co-deploy only (note-0086). Both files are optional, so the
+# standalone droplet -- where kp-auth isn't installed and github_pat is passed
+# directly -- runs fine with neither present. Do not drop either `-`.
+#
+# /etc/cartenza.env is the fleet's single source of truth, read by all five kp
+# units (note-0090). This unit was the one service outside it, keeping its own
+# copy of the shared values, and that is exactly the service that drifted: when
+# the dev droplet was promoted to production, every kp service picked up the new
+# hosts from the shared file and capella kept a stale KP_CONNECT_BASE_URL, so a
+# production session handed a user a connect link on dev.connect.cartenza.ai.
+# Reading the shared file first means host and secret values can no longer be
+# missed one service at a time.
+EnvironmentFile=-/etc/cartenza.env
+# Capella's own values only -- PYTHONPATH, CAPELLA_VIEW_SECRET. Listed second so
+# it still wins on anything it does set, which is what makes a one-off override
+# possible without editing the shared file. Note CAPELLA_VIEW_SECRET must NOT be
+# set to CARTENZA_CONNECT_SECRET_KEY's value: one secret per purpose.
 EnvironmentFile=-/etc/capella-mcp.env
 ExecStart=/opt/capella_fabric_generator/.venv/bin/python mcp_server.py
 Restart=always

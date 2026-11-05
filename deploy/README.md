@@ -475,36 +475,74 @@ sudo -u www-data PYTHONPATH=/opt/knowledge_partner/kp   /opt/capella_fabric_gene
 
 ### C2. Environment file
 
-`deploy/capella-mcp.service` reads `EnvironmentFile=-/etc/capella-mcp.env`
-(the `-` makes it optional, which is what keeps the standalone deployment
-working unchanged). On the Cartenza droplet, create it:
+`deploy/capella-mcp.service` reads two env files, both optional (the leading
+`-`, which is what keeps the standalone deployment working with neither
+present — don't drop either one):
+
+```
+EnvironmentFile=-/etc/cartenza.env       # the fleet's shared values
+EnvironmentFile=-/etc/capella-mcp.env    # capella's own, and wins where it overlaps
+```
+
+**Do not set a host or a shared secret in `/etc/capella-mcp.env`.** On the
+Cartenza droplet, `/etc/cartenza.env` already supplies `CARTENZA_DB_PATH`,
+`CARTENZA_CONNECT_SECRET_KEY`, `KP_CONNECT_BASE_URL` and `KP_VIEWER_BASE_URL`
+to every kp unit, and this server now reads the same file. Nothing here needs
+to name an environment, which is the point — see the warning below.
+
+So on the Cartenza droplet this file holds only what is genuinely capella's:
 
 ```bash
 cat > /etc/capella-mcp.env <<'EOF'
 PYTHONPATH=/opt/knowledge_partner/kp
-CARTENZA_DB_PATH=/var/lib/cartenza/cartenza.db
-CARTENZA_CONNECT_SECRET_KEY=<same value kp-connect uses>
-KP_CONNECT_BASE_URL=https://dev.connect.cartenza.ai
 XDG_CACHE_HOME=/var/lib/capella-fabric/cache
 EOF
 chmod 600 /etc/capella-mcp.env
 chown www-data:www-data /etc/capella-mcp.env
 ```
 
-**`CARTENZA_CONNECT_SECRET_KEY` must match kp-connect's byte for byte.** A
-mismatch does not fail at startup — it fails much later, when a connect code is
-finally redeemed, as an undecryptable credential. This exact class of
-cross-service secret drift has bitten this project repeatedly; copy the value
-from the running kp-connect unit rather than generating a new one.
+> **Why this section no longer names a hostname.** It used to hardcode
+> `KP_CONNECT_BASE_URL=https://dev.connect.cartenza.ai` in this very recipe —
+> labelled as the production droplet's. When the dev box was promoted to
+> production, every kp service picked up the right hosts from the shared file
+> and capella kept the stale one, because it was the one service holding its own
+> copy. The symptom reached a user: a production model session handed them a
+> connect link on `dev.connect.cartenza.ai` and asked them to authorize GitHub
+> there. Nothing was exposed — both hostnames proxy to the same kp-connect
+> process — but the fix is structural, not a corrected value. A per-service copy
+> of a fleet-wide value is a drift waiting for the next box.
+
+**On `CARTENZA_CONNECT_SECRET_KEY`:** it must match kp-connect's byte for byte,
+and reading the shared file is now what guarantees that. A mismatch does not fail
+at startup — it fails much later, when a connect code is finally redeemed, as an
+undecryptable credential. If you ever do override it here, copy the value from
+the running kp-connect unit rather than generating a new one; this class of
+cross-service secret drift has bitten this project repeatedly.
 
 `www-data` also needs read/write on `CARTENZA_DB_PATH` and its directory (SQLite
-writes a `-wal`/`-shm` sibling next to the file).
+writes a `-wal`/`-shm` sibling next to the file), and read on
+`/etc/cartenza.env`.
 
-`CAPELLA_VIEW_SECRET` can go in this file too if you want view links to survive
-a restart (see *MCP 5b*). It is independent of
-`CARTENZA_CONNECT_SECRET_KEY` on purpose and must not be set to the same value —
-that one is a Fernet key for credentials, and one secret per purpose is the rule
-this project keeps relearning.
+`CAPELLA_VIEW_SECRET` belongs in this file if you want view links to survive a
+restart (see *MCP 5b*) — it is capella's own, not a fleet value. It is
+independent of `CARTENZA_CONNECT_SECRET_KEY` on purpose and must not be set to
+the same value — that one is a Fernet key for credentials, and one secret per
+purpose is the rule this project keeps relearning.
+
+### C2a. Verifying the environment actually reached the process
+
+Reading the file back proves only what the file says. After
+`systemctl daemon-reload` and a restart, check the **running process**:
+
+```bash
+sudo tr '\0' '\n' < /proc/$(systemctl show -p MainPID --value capella-mcp)/environ \
+  | grep -E 'KP_CONNECT_BASE_URL|CARTENZA_DB_PATH'
+```
+
+A value that is right in the file and wrong here means the unit was not
+restarted. The end-to-end check is `begin_connect`: the URL it returns must be
+on the host this droplet actually serves. Note that restarting drops in-memory
+sessions, so agents mid-task will need to re-clone.
 
 ### C3. nginx and DNS
 
