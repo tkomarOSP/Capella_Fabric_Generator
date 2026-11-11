@@ -1347,27 +1347,284 @@ def _enforce_function_types(model, patch_data: list) -> None:
                     child['_type'] = correct_type  # inject if absent, correct if wrong
 
 
-_UNSUPPORTED_EXTEND_ATTRS = frozenset({
-    'exchanges', 'component_exchanges', 'physical_links',
+# --- OBS-0002: declarative OA interaction creation --------------------------
+
+# The one class that may own a FunctionalExchange created by this tool.
+# Deliberately a CLASS check and not `_resolve_phase_for_uuid(...) == 'OA'`:
+# OA is not uniformly port-free. Operational *entities* exchange through
+# CommunicationMean, whose role_tag is ownedComponentExchanges and whose
+# endpoints are Entity.ports -- so a phase check would wave entity-level
+# exchanges straight through the gap note-0017 closed. Keep it on the class.
+_EXCHANGE_OWNER_CLASS = 'OperationalActivity'
+
+# Tags that mean "the author wrote HTML on purpose". Anything else containing
+# '<' is escaped -- see _description_for_html.
+_HTML_TAG_HINTS = ('<p', '<br', '<b>', '<i>', '<em', '<strong', '<ul', '<ol',
+                   '<li', '<div', '<span', '<a ', '<h1', '<h2', '<h3', '<table')
+
+
+def _description_for_html(text: str) -> str:
+    """Escape a plain-text description so capellambse's HTML repair can't eat it.
+
+    FunctionalExchange.description is an HTMLStringPOD whose _to_xml runs
+    helpers.repair_html. That handles a bare '&' and most stray '<' correctly,
+    but a word in angle brackets is parsed as a tag and rewritten: measured,
+    "moved <see note>" becomes "moved <see note=''/>", which renders as
+    nothing. The text is lost with no error -- the exact failure class this
+    change exists to avoid. So a description containing '<' but none of the
+    tags an author would actually type is escaped; anything already shaped
+    like markup passes through for repair_html to handle properly.
+    """
+    if '<' not in text and '&' not in text:
+        return text
+    lowered = text.lower()
+    if any(hint in lowered for hint in _HTML_TAG_HINTS):
+        return text
+    return html.escape(text, quote=False)
+
+
+def _resolve_exchange_endpoint(model, ref, label: str, name: str):
+    """Resolve one endpoint of an `exchange:` entry, or raise saying why not.
+
+    Deliberately NOT routed through _resolve_phase_for_uuid: that swallows
+    every exception and returns the '-' sentinel, so "this uuid is not in the
+    model" and "this uuid is a diagram" come back identical. The author needs
+    to know which happened, because the two fixes are different.
+    """
+    if isinstance(ref, _PromiseRef):
+        raise ValueError(
+            f"exchange: '{name}' gives {label} as !promise {ref.value} -- wiring an "
+            "activity created in the SAME patch is not supported yet. Create the "
+            "activities in one patch, then wire them in the next, where their real "
+            "uuids are known."
+        )
+    if not isinstance(ref, _UUIDRef):
+        if ref is None:
+            raise ValueError(
+                f"exchange: '{name}' is missing {label}:. Both endpoints are required; "
+                f"this tool does not infer a direction. Add {label}: !uuid <uuid>."
+            )
+        raise ValueError(
+            f"exchange: '{name}' gives {label} as a plain value ({ref!r}), not a tagged "
+            f"reference. Write {label}: !uuid {ref} instead. An untagged value would go "
+            "through as an unvalidated IDREF, which is the corruption note-0017 exists "
+            "to prevent."
+        )
+    try:
+        obj = model.by_uuid(ref.value)
+    except Exception:
+        raise ValueError(
+            f"exchange: '{name}' {label} uuid {ref.value} is not in this model. Nothing "
+            "was changed. Find the activity with search_model_objects or browse_model "
+            "(phase OA, object_type 'Operational Activity') and use the uuid it reports. "
+            "A uuid from an earlier session goes stale if the model moved on -- "
+            "pull_model_changes first if that is likely."
+        ) from None
+    actual = type(obj).__name__
+    if actual != _EXCHANGE_OWNER_CLASS:
+        raise ValueError(
+            f"exchange: '{name}' {label} uuid {ref.value} is a {actual} "
+            f"({getattr(obj, 'name', '?')!r}), not an {_EXCHANGE_OWNER_CLASS}. This tool "
+            "creates OA interactions only between operational activities, because "
+            "OperationalActivity.exchanges connects activities directly with no ports. "
+            "Entity-level communication (CommunicationMean) and SA/LA/PA functional "
+            "exchanges run through ports this tool does not create or validate -- draw "
+            "those in the Capella desktop editor (note-0017)."
+        )
+    return obj
+
+
+def _activity_ancestry(obj) -> list[str]:
+    """Root-ward uuid chain for an activity, itself first.
+
+    Including the object itself is deliberate: it makes a parent/child pair
+    resolve to the parent, which is what Capella does. The hop cap and the
+    self-reference guard mirror _resolve_phase_for_uuid; the cap is higher
+    because this walks containment rather than going just far enough to name
+    a layer.
+    """
+    chain: list[str] = []
+    current = obj
+    for _ in range(50):
+        uuid_val = getattr(current, 'uuid', None)
+        if not uuid_val:
+            break
+        chain.append(uuid_val)
+        parent = getattr(current, 'parent', None)
+        if parent is None or parent is current:
+            break
+        current = parent
+    return chain
+
+
+def _lca_for_exchange(model, source, target, name: str) -> str:
+    """The activity that should own this exchange: its endpoints' lowest common
+    ancestor, which is where Capella itself files a FunctionalExchange.
+    """
+    tgt_seen = set(_activity_ancestry(target))
+    for uuid_val in _activity_ancestry(source):
+        if uuid_val not in tgt_seen:
+            continue
+        owner = model.by_uuid(uuid_val)
+        if type(owner).__name__ == _EXCHANGE_OWNER_CLASS:
+            return uuid_val
+        raise ValueError(
+            f"exchange: '{name}' endpoints {getattr(source, 'name', '?')!r} and "
+            f"{getattr(target, 'name', '?')!r} have no common {_EXCHANGE_OWNER_CLASS} to "
+            "own the interaction -- their nearest shared container is "
+            f"{getattr(owner, 'name', '?')!r}, a {type(owner).__name__}, which has no "
+            "exchanges attribute. Nothing was changed. Nest both activities under a "
+            "shared parent activity, or pass owner: !uuid <activity> naming one that "
+            "contains them both."
+        )
+    raise ValueError(
+        f"exchange: '{name}' endpoints {getattr(source, 'name', '?')!r} and "
+        f"{getattr(target, 'name', '?')!r} share no common ancestor, so no activity can "
+        "own the interaction (Capella files a FunctionalExchange under the lowest common "
+        "ancestor of its endpoints). Nothing was changed. They are most likely in "
+        "separate activity trees."
+    )
+
+
+def _expand_oa_exchanges(model, patch_data: list) -> list[dict]:
+    """Rewrite each `exchange:` entry into the canonical parent/extend form,
+    computing the owning activity so the author never has to name it (OBS-0002).
+
+    An interaction is owned by the activity ABOVE the two it connects, not by
+    either endpoint -- so writing the canonical form makes the author know the
+    activity tree, which is precisely what a declarative format should spare
+    them. Here they give two endpoints and the server works out the owner.
+
+    Runs FIRST in _preprocess_patch, ahead of the guard, so what it produces
+    is checked like any hand-written patch. The other way round, a shorthand
+    entry carries no `exchanges` key for the guard to inspect, and the
+    allow-decision ends up living in two places -- which is how a hole ships.
+
+    Returns one descriptor per created exchange for apply_patch to verify
+    after decl.apply(), following _default_cardinality_promises' pattern:
+    source and target are unconstrained references that capellambse will not
+    check, so reading them back is the only evidence they landed where asked.
+    """
+    checks: list[dict] = []
+    for position, item in enumerate(patch_data, start=1):
+        if not isinstance(item, dict) or 'exchange' not in item:
+            continue
+        if any(key in item for key in ('parent', 'extend', 'set')):
+            raise ValueError(
+                f"Patch entry #{position} uses both the exchange: shorthand and "
+                "parent:/extend:/set:. Use one or the other -- the exchange: form "
+                "computes its own owner."
+            )
+        spec = item['exchange']
+        if not isinstance(spec, dict):
+            raise ValueError(
+                f"Patch entry #{position}: exchange: must be a mapping carrying name, "
+                "source and target."
+            )
+        name = spec.get('name')
+        if not name:
+            raise ValueError(
+                f"exchange: entry #{position} has no name:. An interaction must be "
+                "named -- an unnamed FunctionalExchange is indistinguishable from the "
+                "hand-drawn ones this is meant to replace. Add name: <interaction name>."
+            )
+        source = _resolve_exchange_endpoint(model, spec.get('source'), 'source', name)
+        target = _resolve_exchange_endpoint(model, spec.get('target'), 'target', name)
+        if source.uuid == target.uuid:
+            raise ValueError(
+                f"exchange: '{name}' has the same activity "
+                f"({getattr(source, 'name', '?')!r}) as both source and target. Capella "
+                "permits a self-loop structurally, but it is almost always a copied "
+                "uuid. If one is genuinely intended, draw it in the desktop editor."
+            )
+
+        if spec.get('owner') is not None:
+            owner_obj = _resolve_exchange_endpoint(model, spec['owner'], 'owner', name)
+            shared = set(_activity_ancestry(source)) & set(_activity_ancestry(target))
+            if owner_obj.uuid not in shared:
+                raise ValueError(
+                    f"exchange: '{name}' owner: {getattr(owner_obj, 'name', '?')!r} does "
+                    "not contain both endpoints. An explicit owner must be the lowest "
+                    "common ancestor or an activity above it, or the interaction is "
+                    "filed in a branch unrelated to what it connects. Omit owner: to "
+                    "have it computed."
+                )
+            owner_uuid = owner_obj.uuid
+        else:
+            owner_uuid = _lca_for_exchange(model, source, target, name)
+
+        promise_id = spec.get('promise_id') or f"_xch_{uuid.uuid4().hex}"
+        child: dict = {
+            '_type': 'FunctionalExchange',
+            'name': name,
+            'source': _UUIDRef(source.uuid),
+            'target': _UUIDRef(target.uuid),
+            'promise_id': promise_id,
+        }
+        if spec.get('description') is not None:
+            child['description'] = _description_for_html(str(spec['description']))
+        if spec.get('summary') is not None:
+            child['summary'] = spec['summary']
+
+        # Replace the shorthand entry in place, preserving author order --
+        # decl applies entries in sequence and a later one may use this promise.
+        item.clear()
+        item['parent'] = _UUIDRef(owner_uuid)
+        item['extend'] = {'exchanges': [child]}
+
+        checks.append({
+            'promise_id': promise_id,
+            'name': name,
+            'source': source.uuid,
+            'target': target.uuid,
+            'owner': owner_uuid,
+        })
+    return checks
+
+
+# component_exchanges and physical_links are refused in every phase; exchanges
+# is refused unless its parent is an OperationalActivity (OBS-0002).
+_ALWAYS_UNSUPPORTED_EXTEND_ATTRS = frozenset({
+    'component_exchanges', 'physical_links',
 })
 
 
-def _reject_unsupported_exchange_creation(patch_data: list) -> None:
-    """Refuse to create FunctionalExchange/ComponentExchange/PhysicalLink
-    elements via extend: (note-0017).
+def _reject_unsupported_exchange_creation(model, patch_data: list) -> None:
+    """Refuse exchange/link creation via extend: wherever it needs ports
+    this tool does not create (note-0017), with one carve-out for OA
+    activity interactions (OBS-0002).
 
-    These all connect ports (FunctionInputPort/FunctionOutputPort,
-    PhysicalPort), not the functions/components/UUIDs a patch typically
-    references directly. apply_model_patch's generic decl-based engine sets
-    source/target as raw IDREF associations with no validation that the
-    referenced UUID is actually a port -- it will happily wire an exchange's
-    target directly at a Function/Component's own UUID, producing a
-    structurally invalid, dangling reference that verify_model won't catch
-    (patch reports "ok", nothing flags the corruption). The Capella desktop
-    editor creates the backing ports as part of drawing the connection;
-    replicating that here isn't worth the complexity for something usually
-    faster to draw by hand than to describe, and a wrong auto-created
-    exchange is more work to find and remove than to just draw correctly.
+    ComponentExchange and PhysicalLink connect ports -- InputPin/OutputPin
+    (FunctionInputPort/FunctionOutputPort on older capellambse) and
+    PhysicalPort -- not the functions/components a patch references
+    directly. The generic decl engine sets source/target as raw IDREF
+    associations with no check that the referenced UUID is even a port: it
+    will happily wire a target at a Component's own UUID, producing a
+    dangling reference that verify_model won't catch (the patch reports
+    "ok" while the model is invalid). The Capella desktop editor creates
+    the backing ports as part of drawing the connection, and a wrongly
+    auto-created exchange is more work to find and remove than the
+    connection was to draw. So those two stay refused in every phase.
+
+    `exchanges` is different, and only at OA. OperationalActivity has NO
+    pin or port containment at all -- measured on capellambse 0.8.1, where
+    its only relevant Containment is `exchanges` (role_tag
+    ownedFunctionalExchanges), while SystemFunction/LogicalFunction/
+    PhysicalFunction each additionally carry inputs/outputs holding
+    InputPin/OutputPin. Confirmed against a real model: every OA exchange
+    there has an OperationalActivity as both source and target. There are
+    no ports to create, so the reason above does not apply and the patch
+    can be honest. It is gated on the parent's CLASS rather than on the OA
+    phase because OA is not uniformly port-free: operational entities
+    exchange through CommunicationMean, which is an ownedComponentExchanges
+    role between Entity.ports, and a phase check would wave those through.
+
+    What survives even at OA is that source/target are unconstrained, so
+    the shorthand validates both endpoints before apply and apply_patch
+    reads them back afterwards. A hand-written canonical entry gets the
+    same endpoint check here, so writing the long form is not a way round
+    it.
+
     Renaming/retagging *existing* exchanges/links via set: name: is
     unaffected -- that pattern doesn't touch these keys under extend:.
     """
@@ -1377,17 +1634,60 @@ def _reject_unsupported_exchange_creation(patch_data: list) -> None:
         extend = item.get('extend', {})
         if not isinstance(extend, dict):
             continue
-        hit = _UNSUPPORTED_EXTEND_ATTRS & extend.keys()
+        hit = _ALWAYS_UNSUPPORTED_EXTEND_ATTRS & extend.keys()
         if hit:
             raise ValueError(
                 "apply_model_patch cannot create new "
-                f"{'/'.join(sorted(hit))} via extend: -- FunctionalExchange/"
-                "ComponentExchange/PhysicalLink creation requires backing "
-                "ports that this tool doesn't create or validate (note-0017). "
-                "Create these directly in the Capella desktop editor; "
-                "renaming/retagging *existing* exchanges/links via set: "
-                "name: remains reliable."
+                f"{'/'.join(sorted(hit))} via extend: -- ComponentExchange/"
+                "PhysicalLink creation requires backing ports that this tool "
+                "doesn't create or validate (note-0017). Create these directly "
+                "in the Capella desktop editor; renaming/retagging *existing* "
+                "exchanges/links via set: name: remains reliable."
             )
+        if 'exchanges' not in extend:
+            continue
+
+        parent_ref = item.get('parent')
+        if not isinstance(parent_ref, _UUIDRef):
+            raise ValueError(
+                "apply_model_patch cannot create exchanges under a parent given as "
+                f"{'!promise' if isinstance(parent_ref, _PromiseRef) else 'that value'}"
+                " -- the owning activity has to exist already so its class can be "
+                "checked. Create the activities in one patch, then wire them in the "
+                "next (OBS-0002)."
+            )
+        try:
+            parent_obj = model.by_uuid(parent_ref.value)
+        except Exception:
+            raise ValueError(
+                f"apply_model_patch cannot create exchanges under parent uuid "
+                f"{parent_ref.value} -- it is not in this model. Nothing was changed."
+            ) from None
+        parent_class = type(parent_obj).__name__
+        if parent_class != _EXCHANGE_OWNER_CLASS:
+            raise ValueError(
+                f"apply_model_patch cannot create exchanges under a {parent_class} "
+                f"({getattr(parent_obj, 'name', '?')!r}) -- only an "
+                f"{_EXCHANGE_OWNER_CLASS} owns an exchange this tool can create "
+                "safely, because OA activities connect directly with no ports. A "
+                "SA/LA/PA functional exchange and an OA entity CommunicationMean "
+                "both run through ports this tool doesn't create or validate "
+                "(note-0017); draw those in the Capella desktop editor."
+            )
+        for child in extend.get('exchanges', []):
+            if not isinstance(child, dict):
+                continue
+            for label in ('source', 'target'):
+                if not isinstance(child.get(label), _UUIDRef):
+                    raise ValueError(
+                        f"An exchange being created under "
+                        f"{getattr(parent_obj, 'name', '?')!r} has no valid {label}: "
+                        "-- it must be !uuid <activity-uuid>. capellambse does not "
+                        "constrain an exchange's endpoints, so an untagged or missing "
+                        "one becomes a dangling reference nothing downstream catches "
+                        "(note-0017). The exchange: shorthand resolves and class-checks "
+                        "both endpoints for you."
+                    )
 
 
 def _normalize_pa_component_key(model, patch_data: list) -> None:
@@ -1557,26 +1857,86 @@ def _default_cardinality_promises(patch_data: list) -> list[str]:
     return promise_ids
 
 
-def _preprocess_patch(model, patch_yaml: str) -> tuple[str, list[str]]:
+def _verify_created_exchanges(promises, checks: list[dict]) -> None:
+    """Read each created OA interaction back and raise if it isn't what was asked.
+
+    This has to happen here rather than in verify_model, for two reasons.
+    verify_model loads the model from disk, so by the time it ran the bad
+    exchange would already be committed -- and note-0017 recorded that it
+    does not detect this shape of corruption anyway.
+
+    Raising is safe to treat as fatal: apply_patch opened a fresh model and
+    model.save() is the only write, so an exception from here returns the
+    standard error dict with the in-memory tree dropped and the working copy
+    byte-identical. Nothing to roll back.
+
+    source and target are the point. They are unconstrained references --
+    capellambse will let an exchange point at a capability, a component, or
+    nothing -- so reading them back is the only evidence the IDREFs landed
+    where the patch asked. The owner is checked too, which catches the
+    exchange being filed somewhere other than the computed ancestor.
+    """
+    for check in checks:
+        obj = promises.get(decl.Promise(check['promise_id']))
+        if obj is None:
+            raise ValueError(
+                f"apply_model_patch reported creating the interaction "
+                f"{check['name']!r} but it cannot be read back. The model was NOT "
+                "saved and the working copy is unchanged. This is a tool defect, not "
+                "a problem with the patch -- please report it with the patch that "
+                "produced it."
+            )
+        actual_class = type(obj).__name__
+        observed = {
+            'class': actual_class,
+            'source': getattr(getattr(obj, 'source', None), 'uuid', None),
+            'target': getattr(getattr(obj, 'target', None), 'uuid', None),
+            'owner': getattr(getattr(obj, 'parent', None), 'uuid', None),
+        }
+        expected = {
+            'class': 'FunctionalExchange',
+            'source': check['source'],
+            'target': check['target'],
+            'owner': check['owner'],
+        }
+        wrong = [k for k in expected if observed[k] != expected[k]]
+        if wrong:
+            detail = '; '.join(
+                f"{k} is {observed[k]!r}, expected {expected[k]!r}" for k in wrong
+            )
+            raise ValueError(
+                f"apply_model_patch created the interaction {check['name']!r} but it did "
+                f"not verify: {detail}. The model was NOT saved and the working copy is "
+                "unchanged -- re-read it with browse_model before retrying. This is a "
+                "tool defect, not a problem with the patch; please report it with the "
+                "patch that produced it."
+            )
+
+
+def _preprocess_patch(model, patch_yaml: str) -> tuple[str, list[str], list[dict]]:
     """Parse patch YAML, enforce ARCADIA type conventions, re-serialize.
 
-    Returns the processed YAML plus any promise_ids needing a default
-    min_card/max_card stamped after decl.apply() runs (note-0044).
+    Returns the processed YAML, any promise_ids needing a default
+    min_card/max_card stamped after decl.apply() runs (note-0044), and a
+    descriptor per OA interaction created via the exchange: shorthand for
+    apply_patch to read back afterwards (OBS-0002).
     """
     try:
         patch_data = yaml.load(patch_yaml, Loader=_PatchLoader)
     except yaml.YAMLError:
-        return patch_yaml, []  # pass through; decl.apply() will surface the error
+        return patch_yaml, [], []  # pass through; decl.apply() will surface the error
     if not isinstance(patch_data, list):
-        return patch_yaml, []
-    _reject_unsupported_exchange_creation(patch_data)
+        return patch_yaml, [], []
+    # Expansion first, so the guard below inspects what it produced.
+    exchange_checks = _expand_oa_exchanges(model, patch_data)
+    _reject_unsupported_exchange_creation(model, patch_data)
     _normalize_pa_component_key(model, patch_data)
     _enforce_function_types(model, patch_data)
     _enforce_component_types(model, patch_data)
     _enforce_pv_types(patch_data)
     cardinality_promise_ids = _default_cardinality_promises(patch_data)
     processed = yaml.dump(patch_data, Dumper=_PatchDumper, default_flow_style=False, allow_unicode=True)
-    return processed, cardinality_promise_ids
+    return processed, cardinality_promise_ids, exchange_checks
 
 
 def apply_patch(session: dict, patch_yaml: str) -> dict:
@@ -1584,8 +1944,9 @@ def apply_patch(session: dict, patch_yaml: str) -> dict:
     aird_path = Path(session['aird_path'])
     model = open_model(aird_path, resources=session.get('resources') or None)
     try:
-        processed_yaml, cardinality_promise_ids = _preprocess_patch(model, patch_yaml)
+        processed_yaml, cardinality_promise_ids, exchange_checks = _preprocess_patch(model, patch_yaml)
         promises = decl.apply(model, io.StringIO(processed_yaml))
+        _verify_created_exchanges(promises, exchange_checks)
         for pid in cardinality_promise_ids:
             obj = promises.get(decl.Promise(pid))
             if obj is None:

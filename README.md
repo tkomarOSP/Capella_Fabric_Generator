@@ -188,9 +188,37 @@ Creating a `property_value_groups:` entry this way also automatically writes the
 
 At the PA phase, always use `owned_components:`, not `components:` — `PhysicalComponent.components` is a deprecated, non-model-coupled property on current capellambse, and extending it raises `"not model-coupled"`. `owned_components:` is the real containment. (On older capellambse installs that predate this split, `components:` is already the real containment and works fine as-is — the server detects which shape the loaded model's classes support and only rewrites `components:` -> `owned_components:` when the split exists.)
 
-### Exchanges and physical links are not supported via `extend:`
+### OA interactions: supported, with the `exchange:` form
 
-`apply_model_patch` rejects `extend: exchanges:`, `component_exchanges:`, and `physical_links:` with a clear error rather than creating them — these all connect ports (`FunctionInputPort`/`FunctionOutputPort`, `PhysicalPort`) that this tool doesn't create or validate, and a malformed one is more work to find and remove than to draw correctly in the Capella desktop editor in the first place. Renaming/retagging *existing* exchanges or links via `set: name:` is unaffected and remains reliable.
+An interaction between two operational activities can be created declaratively. Give the two endpoints and nothing else — the server computes the owner:
+
+```yaml
+- exchange:
+    name: Charger State
+    description: The charger's current state, each second
+    source: !uuid <source-activity-uuid>
+    target: !uuid <target-activity-uuid>
+```
+
+There is no `parent:`, and that is the point. Capella files a `FunctionalExchange` under the **lowest common ancestor** of its endpoints, not under either endpoint, so writing the canonical `parent:`/`extend: exchanges:` form means knowing the activity tree — exactly what a declarative format should spare the author. One patch can now propose activities *and* the interactions between them.
+
+Optional keys: `owner: !uuid <activity>` files it higher than the computed ancestor (it must still contain both endpoints), `promise_id:` lets a later entry in the same patch reference it, and `summary:` passes through.
+
+Three things are checked before anything is written, because `FunctionalExchange.source`/`.target` are unconstrained references that capellambse will not validate — it will happily point an exchange at a component, or at nothing:
+
+- Both endpoints must resolve, and must be operational activities. A missing uuid and a wrong-class uuid get different errors, because the fixes differ.
+- Endpoints must be `!uuid`. An untagged value is refused rather than written through as an unvalidated reference.
+- An endpoint created in the *same* patch (`!promise`) is not supported yet — create the activities in one patch and wire them in the next.
+
+After creating, the exchange's source, target and owner are read back and compared with what the patch asked for. A mismatch returns an error and **nothing is saved**: `apply_model_patch` opens a fresh model and `model.save()` is the only write, so a failed check leaves the working copy byte-identical.
+
+`description` is an HTML field (`HTMLStringPOD`). Plain text is escaped for you — without that, a word in angle brackets is parsed as a tag and silently dropped.
+
+### Other exchanges and physical links are still not supported via `extend:`
+
+`apply_model_patch` rejects `extend: component_exchanges:` and `extend: physical_links:` in every phase, and `extend: exchanges:` whose parent is **not** an `OperationalActivity`. That covers SA/LA/PA function-to-function exchanges and OA *entity* `CommunicationMean`s — all of which connect ports (`InputPin`/`OutputPin`, `FunctionInputPort`/`FunctionOutputPort` on older capellambse, `PhysicalPort`) that this tool doesn't create or validate, and a malformed one is more work to find and remove than to draw correctly in the Capella desktop editor in the first place.
+
+Note the carve-out above is keyed on the parent's **class**, not on the OA phase: OA is not uniformly port-free. An `OperationalActivity` has no pin or port containment at all, but an `oa.Entity` does, and its exchanges are a `ComponentExchange` role — so a phase check would let entity-level exchanges through. Renaming/retagging *existing* exchanges or links via `set: name:` is unaffected throughout and remains reliable.
 
 ### Exchange Items, Exchange Item Elements, Classes, and Associations
 

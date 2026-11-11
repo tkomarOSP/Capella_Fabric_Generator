@@ -233,12 +233,32 @@ mcp = FastMCP(
         "there) and realize them onto PA, or model them in the Capella desktop editor. Targeting "
         "the containing PhysicalFunctionPkg does succeed but makes siblings of the root physical "
         "function, not children — a different structure, so choose it deliberately if at all. "
-        "apply_model_patch cannot create FunctionalExchange/ComponentExchange/PhysicalLink "
-        "elements (extend: exchanges:/component_exchanges:/physical_links:) -- these connect "
-        "ports that this tool doesn't create or validate, so such patches are rejected with a "
-        "clear error rather than silently producing invalid XML. Create these directly in the "
-        "Capella desktop editor; renaming/retagging *existing* ones via set: name: still works "
-        "fine. "
+        "OA INTERACTIONS between operational activities CAN be created, with the exchange: "
+        "entry form -- so one patch can propose activities AND the interactions between them, "
+        "instead of the human wiring each one by hand and you renaming it afterwards. Give "
+        "name, source and target (both operational activities) and the server works out the "
+        "owning activity itself: Capella files an interaction under the LOWEST COMMON ANCESTOR "
+        "of its endpoints, not under either endpoint, so you do not need to know the activity "
+        "tree. It also reads source/target/owner back after creating and refuses without "
+        "saving anything if any of them is not what was asked for. Example:\n"
+        "- exchange:\n"
+        "    name: Charger State\n"
+        "    description: The charger's current state, each second\n"
+        "    source: !uuid <activity-uuid>\n"
+        "    target: !uuid <activity-uuid>\n"
+        "Optional: owner: !uuid <activity> to file it higher than the computed ancestor, and "
+        "promise_id: to reference it later in the same patch. description is an HTML field; "
+        "plain text is escaped for you. Endpoints must be !uuid -- an untagged value is "
+        "refused rather than written as an unvalidated reference, and an activity created in "
+        "the SAME patch (!promise) is not supported yet: create the activities in one patch, "
+        "wire them in the next. "
+        "Everything else here is still rejected with a clear error rather than silently "
+        "producing invalid XML, and must be drawn in the Capella desktop editor: extend: "
+        "component_exchanges: and extend: physical_links: always, and extend: exchanges: "
+        "whose parent is not an OperationalActivity -- that covers SA/LA/PA function-to-"
+        "function exchanges and OA entity CommunicationMeans, which all connect ports this "
+        "tool does not create or validate. Renaming/retagging *existing* exchanges and links "
+        "via set: name: works fine throughout. "
         "Data-modeling elements -- Data Package, Class, Association, Exchange Item, Exchange "
         "Item Element, Data Type -- are browsable via browse_model/search_model_objects under "
         "any phase (searched model-wide, since they live under a DataPkg, not one architecture "
@@ -877,11 +897,12 @@ def apply_model_patch(
     time) for the full `_type` auto-injection rules (function/activity,
     component, property-value), the PA-phase `owned_components:` requirement,
     the automatic property-value-group back-reference, and which `extend:`
-    targets are rejected (exchanges/component_exchanges/physical_links).
+    targets are rejected (component_exchanges/physical_links always, and
+    exchanges unless its parent is an OperationalActivity).
 
     Scope convention: limit creation to structure (components/entities),
-    functions, and activities. Call push_model_changes afterward to sync to
-    GitHub.
+    functions, activities, and OA interactions between activities via the
+    `exchange:` form. Call push_model_changes afterward to sync to GitHub.
 
     patch_yaml examples (YAML string):
 
@@ -905,6 +926,15 @@ def apply_model_patch(
                     value: kg          # str → StringPropertyValue
                   - name: value
                     value: 12.5        # float → FloatPropertyValue
+
+        # Wire an OA interaction between two operational activities. No
+        # parent: — the owning activity is computed as the endpoints' lowest
+        # common ancestor, which is where Capella files an interaction:
+        - exchange:
+            name: Charger State
+            description: The charger's current state, each second
+            source: !uuid <source-activity-uuid>
+            target: !uuid <target-activity-uuid>
 
     Args:
         session_id:     Session ID from clone_capella_repo.

@@ -157,9 +157,25 @@ The property value pattern: one `PropertyValueGroup` per property, with `units` 
 
 Explicit `_type` values are respected if provided; the server only injects when `_type` is absent.
 
+#### OA interactions between operational activities — supported via `exchange:`
+
+Give the two endpoints; the server computes the owning activity, because Capella files a `FunctionalExchange` under the **lowest common ancestor** of its endpoints rather than under either one:
+
+```yaml
+- exchange:
+    name: Charger State
+    description: The charger's current state, each second
+    source: !uuid <source-activity-uuid>
+    target: !uuid <target-activity-uuid>
+```
+
+Optional `owner: !uuid <activity>` files it higher (it must still contain both endpoints); `promise_id:` makes it referenceable later in the same patch. `description` is an HTML field and plain text is escaped for you. Both endpoints are resolved and class-checked before anything is written, and source/target/owner are read back afterwards — a mismatch returns an error and saves nothing.
+
+Three things get a patch refused here: an endpoint that is not an operational activity, two endpoints with no common activity to own the interaction (nest them, or pass `owner:`), and an endpoint given as `!promise` — wiring an activity created in the *same* patch is not supported yet, so create the activities in one patch and wire them in the next.
+
 #### Elements this tool will not create — build these in the Capella desktop editor instead
 
-`apply_model_patch` **rejects** any patch targeting `extend: exchanges:` / `extend: component_exchanges:` / `extend: physical_links:` (FunctionalExchange/ComponentExchange/PhysicalLink) with a clear error rather than silently producing invalid XML — these connect ports this tool doesn't create or validate. Create new exchanges/links directly in Capella Studio. Renaming or retagging an *existing* one is fine via `set: name:`/`set: description:` — only creation is blocked.
+`apply_model_patch` **rejects** `extend: component_exchanges:` and `extend: physical_links:` in every phase, and `extend: exchanges:` whose parent is **not** an `OperationalActivity` — with a clear error rather than silently producing invalid XML. That covers SA/LA/PA function-to-function exchanges and OA *entity* `CommunicationMean`s, which all connect ports this tool doesn't create or validate. Create those directly in Capella Studio. Note the rule is on the parent's class, not the phase: OA is not uniformly port-free — an `OperationalActivity` has no port containment, but an `oa.Entity` does. Renaming or retagging an *existing* exchange or link is fine via `set: name:`/`set: description:` throughout.
 
 #### Data-modeling elements (Data Package, Class, Association, Exchange Item, Exchange Item Element, Data Type)
 
@@ -217,6 +233,8 @@ Call `cleanup_session` when the model-editing task is genuinely finished — e.g
 |---|---|---|
 | [b1699e70] | Author identity on patch commits | **Resolved** — `apply_model_patch` now takes real `author_name`/`author_email` params; the `[Author Name]`-in-commit-message workaround is obsolete |
 | [ISSUE-012] | PA NODE component creation produced `Part` objects, corrupting model file | **Resolved** — `_type: PhysicalComponent` now auto-injected on `owned_components` children |
+| [OBS-0002] | Every OA interaction had to be wired by hand in Capella, then renamed by patch | **Resolved** — the `exchange:` form creates interactions between operational activities and computes the owning activity; source/target/owner are read back after apply |
+| [note-0017] | Exchange and link creation produced dangling references nothing caught | **Narrowed** — still refused for `component_exchanges`/`physical_links` and for `exchanges` under a non-activity parent, all of which need ports this tool doesn't create |
 
 <!-- END SERVICE CONTENT -->
 
