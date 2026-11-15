@@ -76,6 +76,55 @@ _NO_AUTH_MSG = (
 )
 
 
+def _no_auth_msg() -> str:
+    """Why the credential-free path is unavailable, and whose problem it is.
+
+    `_NO_AUTH_MSG` alone is the right answer on the standalone Capella Fabric
+    droplet, which has no Cartenza auth database and never will -- there, "pass
+    github_pat" is genuinely the route.
+
+    On a Cartenza co-deploy it is the wrong answer twice over. The advice is
+    impossible for the client that needs this path most (an agent whose safety
+    layer refuses to carry a raw PAT is exactly why begin_connect exists), and
+    it points at the user when the fault is server-side. A real production user
+    hit this: their agent reported the failure, reasonably declined to take a
+    pasted token, and told them to go authorize the repo on the Cartenza site --
+    which could not have helped, because the agent_id path is disabled by the
+    same missing import. They would have authorized, retried, and failed
+    identically.
+
+    So distinguish the two by whether this server was *meant* to have the auth
+    DB. KP_CONNECT_BASE_URL or CARTENZA_DB_PATH being set means someone
+    configured a co-deploy, and kp-auth failing to import is then a deployment
+    fault with a known cause: `pip install -e kp/auth` builds a valid but EMPTY
+    wheel, so the code is reached only via PYTHONPATH (CARTENZA_DEPLOY.md, and
+    cousin_back_log/note-0086).
+    """
+    configured_for_cartenza = bool(
+        _CONNECT_BASE_URL or os.environ.get('CARTENZA_DB_PATH')
+    )
+    if not configured_for_cartenza:
+        return (
+            _NO_AUTH_MSG
+            + " This is the expected answer on a standalone Capella Fabric server,"
+              " which has no Cartenza auth database. If you cannot pass a"
+              " credential at all, you need the Cartenza-hosted capella endpoint"
+              " rather than this one — tell the user that, rather than asking them"
+              " to authorize anything."
+        )
+    return (
+        "Credential-free connect is BROKEN on this server, not unconfigured: it is set"
+        " up as a Cartenza co-deploy (KP_CONNECT_BASE_URL and/or CARTENZA_DB_PATH are"
+        " set) but kp-auth could not be imported, so begin_connect AND the agent_id"
+        " reconnect path are both dead. This is a server-side fault."
+        " Do NOT tell the user to authorize the repo on the Cartenza site — that"
+        " cannot help, because the path that would use their authorization is the one"
+        " that is disabled. Whoever runs the server: PYTHONPATH must include the kp"
+        " directory, because `pip install -e kp/auth` installs an empty wheel"
+        " (CARTENZA_DEPLOY.md, 'Optional fourth app')."
+    )
+
+
 def _find_aird_in(directory: Path) -> Path | None:
     """Return the first .aird file found recursively under directory, or None."""
     hits = list(directory.rglob('*.aird'))
@@ -335,7 +384,7 @@ def begin_connect(agent_id: str, repo_url: str, branch: str = "main") -> dict:
         branch: Branch to connect (default: main).
     """
     if not _AUTH_AVAILABLE:
-        return {"error": _NO_AUTH_MSG}
+        return {"error": _no_auth_msg()}
     if not _CONNECT_BASE_URL:
         return {"error": "KP_CONNECT_BASE_URL env var not set"}
 
@@ -403,7 +452,7 @@ def clone_capella_repo(
     oauth_connection_id = None
     if connect_code:
         if not _AUTH_AVAILABLE:
-            return {"error": _NO_AUTH_MSG}
+            return {"error": _no_auth_msg()}
         resolved = redeem_connect_code(connect_code, audience=_CONNECT_AUDIENCE)
         if "error" in resolved:
             return resolved
@@ -428,6 +477,15 @@ def clone_capella_repo(
         github_pat = scoped["pat"]
         branch = scoped["branch"] or ""
         oauth_connection_id = scoped["oauth_connection_id"]
+    elif repo_url and agent_id and not github_pat and not _AUTH_AVAILABLE:
+        # The agent did everything right -- repo_url plus its registered
+        # agent_id, the documented credential-free reconnect -- and the branch
+        # above was skipped only because kp-auth is missing. Falling through to
+        # the generic message below listed `(repo_url and agent_id)` as an
+        # option the agent had *just* used, which reads as "your authorization
+        # isn't stored" and sends the user to the Cartenza site to fix something
+        # that isn't broken. Name the real fault instead.
+        return {"error": _no_auth_msg()}
     elif not repo_url or not github_pat:
         return {"error": "Provide either (repo_url and github_pat), connect_code, "
                          "or (repo_url and agent_id) for a repo already connected with GitHub."}
@@ -831,7 +889,7 @@ def add_dependency_repo(
                              "PAT (single-use by design). Pass github_pat, or call begin_connect "
                              "again for this dependency repo."}
         if not _AUTH_AVAILABLE:
-            return {"error": _NO_AUTH_MSG}
+            return {"error": _no_auth_msg()}
         # Decrypt fresh per call from the connection id held in session.json --
         # the id is not itself a secret (note-0086).
         github_pat = resolve_oauth_credential(conn_id) or ""
