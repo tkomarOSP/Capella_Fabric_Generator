@@ -40,7 +40,9 @@ import pathlib
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
-CARTENZA_VARS = ("KP_CONNECT_BASE_URL", "CARTENZA_DB_PATH")
+# Cleared before every load, so no case can pass because of a leftover value
+# from the previous one.
+CARTENZA_VARS = ("KP_CONNECT_BASE_URL", "CARTENZA_DB_PATH", "KP_TREE_PATH")
 
 
 def load_server(**env):
@@ -112,6 +114,40 @@ assert "server-side fault" in berr, berr
 print("begin:      begin_connect reports the same single cause")
 
 
+# ===== 2b. the ACTUAL production shape: env file never populated ============
+# capella.cartenza.ai was an open item at the prod cutover, and the unit uses
+# `EnvironmentFile=-`, so a missing file is not a startup error. That leaves a
+# box serving capella.cartenza.ai with NO Cartenza env vars set -- which an
+# env-var-only test calls "standalone" and declares healthy. The kp tree being
+# on disk while the import fails is what distinguishes it.
+import tempfile  # noqa: E402
+
+fake_tree = pathlib.Path(tempfile.mkdtemp(prefix="kptree_"))
+(fake_tree / "auth").mkdir()
+(fake_tree / "auth" / "__init__.py").write_text("", encoding="utf-8")
+
+srv_prod = load_server(KP_TREE_PATH=str(fake_tree))   # no Cartenza vars at all
+srv_prod._AUTH_AVAILABLE = False
+prod = srv_prod._no_auth_msg()
+
+assert "visible on disk" in prod, prod
+assert str(fake_tree) in prod, "the message must name the path it found"
+assert f"PYTHONPATH={fake_tree}" in prod, "and the exact fix, not a general gesture"
+assert "server-side" in prod and "NOT a missing user authorization" in prod
+assert "expected answer on a standalone" not in prod, (
+    "this is the production failure: code on disk, unimportable, and no env "
+    "vars set. Calling it a healthy standalone server is the whole bug"
+)
+print("prod shape:  code on disk + no env vars -> names the path and the fix")
+
+# And the clone path reports the same thing, since that is what the user hits.
+pfn = getattr(srv_prod.clone_capella_repo, "fn", srv_prod.clone_capella_repo)
+perr = pfn(repo_url="https://github.com/x/Distiller_Project",
+           agent_id="some-registered-agent", branch="master").get("error", "")
+assert "visible on disk" in perr, perr
+print("prod shape:  clone_capella_repo reports it too")
+
+
 # ===== 3. standalone: "pass github_pat" is CORRECT, not a bug ==============
 srv2 = load_server()           # neither Cartenza var set
 srv2._AUTH_AVAILABLE = False
@@ -144,5 +180,8 @@ if srv3._AUTH_AVAILABLE:
     print("auth ok:    falls through to the real scope lookup")
 else:
     print("auth ok:    skipped -- kp-auth not importable in this interpreter")
+
+import shutil  # noqa: E402
+shutil.rmtree(fake_tree, ignore_errors=True)
 
 print("\nALL NO-AUTH DIAGNOSIS CHECKS PASSED")

@@ -76,6 +76,28 @@ _NO_AUTH_MSG = (
 )
 
 
+#: Where a co-deploy keeps the kp tree. Overridable because the path is a
+#: deployment choice, not a property of this code; the default is what
+#: CARTENZA_DEPLOY.md specifies.
+_KP_TREE_CANDIDATES = (
+    os.environ.get('KP_TREE_PATH', ''),
+    '/opt/knowledge_partner/kp',
+)
+
+
+def _kp_auth_on_disk() -> Path | None:
+    """The kp tree holding the auth package, if it is on this machine.
+
+    Looks for the package directory rather than trying an import: the import is
+    what already failed, and the question here is *why*. Code present but
+    unimportable means a sys.path problem and nothing else.
+    """
+    for base in _KP_TREE_CANDIDATES:
+        if base and (Path(base) / 'auth' / '__init__.py').is_file():
+            return Path(base)
+    return None
+
+
 def _no_auth_msg() -> str:
     """Why the credential-free path is unavailable, and whose problem it is.
 
@@ -100,6 +122,36 @@ def _no_auth_msg() -> str:
     wheel, so the code is reached only via PYTHONPATH (CARTENZA_DEPLOY.md, and
     cousin_back_log/note-0086).
     """
+    # Strongest signal first: is the auth package sitting on this disk?
+    #
+    # Env vars alone are not enough, and the production failure is exactly why.
+    # capella.cartenza.ai was an open item at the prod cutover, so the likely
+    # cause there is that /etc/capella-mcp.env was never populated -- which
+    # means KP_CONNECT_BASE_URL and CARTENZA_DB_PATH are unset too, and an
+    # env-var test would call that box "standalone" and tell its operator
+    # nothing is wrong. The unit deliberately uses `EnvironmentFile=-` so a
+    # missing file is not a startup error, which is what lets this state exist
+    # quietly.
+    #
+    # Finding kp/auth/__init__.py on disk while `import auth.connect` fails is
+    # unambiguous: the code is here, it is just not on sys.path. That is the
+    # empty-wheel/PYTHONPATH fault, and nothing else looks like it.
+    auth_tree = _kp_auth_on_disk()
+    if auth_tree:
+        return (
+            "Credential-free connect is BROKEN on this server, and the cause is"
+            f" visible on disk: kp-auth is installed at {auth_tree} but"
+            " `import auth.connect` fails, so it is not on sys.path. begin_connect"
+            " AND the agent_id reconnect path are both dead. This is a server-side"
+            " fault, NOT a missing user authorization -- do not tell the user to"
+            " authorize the repo on the Cartenza site, because the path that would"
+            " use their authorization is the one that is disabled."
+            f" Fix: set PYTHONPATH={auth_tree} in /etc/capella-mcp.env and restart"
+            " capella-mcp. (`pip install -e kp/auth` reports success and installs an"
+            " empty wheel, which is why this looks installed. See"
+            " CARTENZA_DEPLOY.md, 'Optional fourth app'.)"
+        )
+
     configured_for_cartenza = bool(
         _CONNECT_BASE_URL or os.environ.get('CARTENZA_DB_PATH')
     )
