@@ -70,10 +70,42 @@ _CONNECT_BASE_URL = os.environ.get('KP_CONNECT_BASE_URL', '').rstrip('/')
 # shares the same connect_codes table once co-deployed.
 _CONNECT_AUDIENCE = 'capella'
 
-_NO_AUTH_MSG = (
-    "Credential-free connect isn't configured on this server — pass github_pat "
-    "directly instead."
-)
+def _not_configured_msg(server: str) -> str:
+    """The plain refusal, naming whichever server produced it."""
+    return (
+        f"Credential-free connect isn't configured on {server} — pass"
+        " github_pat directly instead."
+    )
+
+
+#: How this server identifies itself in error messages. Two capella-fabric
+#: deployments exist -- the standalone droplet (mcp.innovatingwithcapella.com,
+#: no auth DB) and the Cartenza co-deploy (capella.cartenza.ai) -- and they
+#: answer a failed begin_connect with sentences that read almost identically.
+#:
+#: On 2026-11-15 that cost a support cycle: a genuine co-deploy fault was fixed,
+#: and an hour later the same user hit the standalone, because a stale URL had
+#: been copied out of an old system prompt during a reconnect. Same message,
+#: different box, no way to tell from the text.
+#:
+#: Naming the host in the message makes a wrong-endpoint paste self-diagnosing:
+#: the reader sees which server actually answered. Endpoints hand-typed into
+#: system prompts go stale silently, which is the failure list_my_scopes exists
+#: to remove (cousin_back_log/DEC-0003) and which happened anyway.
+_SERVER_LABEL = os.environ.get('CAPELLA_SERVER_LABEL', '').strip()
+
+
+def _server_phrase() -> str:
+    """The host's name if the deployment gave one, else 'this server'.
+
+    Substituted into the sentence rather than appended as a parenthetical, so
+    the message reads as prose either way: "BROKEN on capella.cartenza.ai" or
+    "BROKEN on this server". Unlabelled says nothing it cannot support -- a
+    label guessed from hostname(1) would be worse than none, because the
+    production droplet still answers to its original name and would announce
+    itself as a dev box.
+    """
+    return _SERVER_LABEL or "this server"
 
 
 #: Where a co-deploy keeps the kp tree. Overridable because the path is a
@@ -98,10 +130,10 @@ def _kp_auth_on_disk() -> Path | None:
     return None
 
 
-def _no_auth_msg() -> str:
+def _no_auth_msg(with_host: bool = True) -> str:
     """Why the credential-free path is unavailable, and whose problem it is.
 
-    `_NO_AUTH_MSG` alone is the right answer on the standalone Capella Fabric
+    The plain refusal alone is the right answer on the standalone Capella Fabric
     droplet, which has no Cartenza auth database and never will -- there, "pass
     github_pat" is genuinely the route.
 
@@ -136,10 +168,16 @@ def _no_auth_msg() -> str:
     # Finding kp/auth/__init__.py on disk while `import auth.connect` fails is
     # unambiguous: the code is here, it is just not on sys.path. That is the
     # empty-wheel/PYTHONPATH fault, and nothing else looks like it.
+    # The boot report passes with_host=False: its first line already names the
+    # host, and a journal entry that repeats itself gets skimmed. A tool error
+    # always names it -- that reader has no other context.
+    server = _server_phrase() if with_host else "this server"
+
     auth_tree = _kp_auth_on_disk()
     if auth_tree:
         return (
-            "Credential-free connect is BROKEN on this server, and the cause is"
+            f"Credential-free connect is BROKEN on {server}, and the"
+            " cause is"
             f" visible on disk: kp-auth is installed at {auth_tree} but"
             " `import auth.connect` fails, so it is not on sys.path. begin_connect"
             " AND the agent_id reconnect path are both dead. This is a server-side"
@@ -157,7 +195,7 @@ def _no_auth_msg() -> str:
     )
     if not configured_for_cartenza:
         return (
-            _NO_AUTH_MSG
+            _not_configured_msg(server)
             + " This is the expected answer on a standalone Capella Fabric server,"
               " which has no Cartenza auth database. If you cannot pass a"
               " credential at all, you need the Cartenza-hosted capella endpoint"
@@ -165,7 +203,8 @@ def _no_auth_msg() -> str:
               " to authorize anything."
         )
     return (
-        "Credential-free connect is BROKEN on this server, not unconfigured: it is set"
+        f"Credential-free connect is BROKEN on {server}, not"
+        " unconfigured: it is set"
         " up as a Cartenza co-deploy (KP_CONNECT_BASE_URL and/or CARTENZA_DB_PATH are"
         " set) but kp-auth could not be imported, so begin_connect AND the agent_id"
         " reconnect path are both dead. This is a server-side fault."
@@ -175,6 +214,44 @@ def _no_auth_msg() -> str:
         " directory, because `pip install -e kp/auth` installs an empty wheel"
         " (CARTENZA_DEPLOY.md, 'Optional fourth app')."
     )
+
+
+def _startup_report() -> list[str]:
+    """What this server can and cannot do, said out loud at boot.
+
+    kp-auth is an OPTIONAL dependency, so its absence is caught by
+    `except ImportError` and the server starts perfectly: no failure, no log
+    line, no clue. On 2026-11-15 that silence meant a customer discovered the
+    credential-free path was missing, hours before the operator did -- and the
+    cause (an empty wheel from `pip install -e kp/auth`) had been diagnosed and
+    written into CARTENZA_DEPLOY.md months earlier. The knowledge existed; the
+    system had no way to act on it, because documentation does not fire.
+
+    This fires. It runs once at boot, names the host, and states whether
+    begin_connect is actually live -- so a deploy tells the operator, in a log
+    they already read, instead of a user telling them later.
+
+    It also catches a second silent misconfiguration the error messages hide:
+    kp-auth importable but KP_CONNECT_BASE_URL unset. begin_connect then fails
+    with a completely different message ("env var not set"), so a server can be
+    half-configured and look fine until someone calls the tool.
+
+    Returns lines rather than printing them, so a test can read them without
+    capturing a stream or starting a server.
+    """
+    who = _SERVER_LABEL or "unnamed (set CAPELLA_SERVER_LABEL)"
+    lines = [f"capella-fabric starting - server: {who}"]
+
+    if not _AUTH_AVAILABLE:
+        lines.append("  credential-free connect: DISABLED (kp-auth not importable)")
+        lines.append("  " + _no_auth_msg(with_host=False))
+    elif not _CONNECT_BASE_URL:
+        lines.append("  credential-free connect: DISABLED (kp-auth imported OK, but"
+                     " KP_CONNECT_BASE_URL is not set, so begin_connect cannot build"
+                     " a connect URL). Set it in /etc/capella-mcp.env and restart.")
+    else:
+        lines.append(f"  credential-free connect: ENABLED via {_CONNECT_BASE_URL}")
+    return lines
 
 
 def _find_aird_in(directory: Path) -> Path | None:
@@ -1238,4 +1315,9 @@ def cleanup_session(session_id: str) -> dict:
 # ---------------------------------------------------------------------------
 
 if __name__ == '__main__':
+    # stderr, never stdout: under a stdio transport stdout is the JSON-RPC
+    # channel and a banner there corrupts the session. Harmless under
+    # streamable-http, but the habit has to hold for both.
+    for _line in _startup_report():
+        print(_line, file=sys.stderr, flush=True)
     mcp.run(transport='streamable-http')

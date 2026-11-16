@@ -373,7 +373,27 @@ curl -s https://capella.cartenza.ai/view/none/view_none.html
 
 1. Go to **claude.ai → Settings → Customize → Connectors**
 2. Click **Add connector**
-3. Enter the URL: `https://mcp.innovatingwithcapella.com/mcp`
+3. Enter the URL **for the deployment you mean to use** — there are two, and
+   they are not interchangeable:
+
+   | Deployment | URL | `begin_connect` |
+   |---|---|---|
+   | Cartenza co-deploy — **use this one unless you have a reason not to** | `https://capella.cartenza.ai/mcp` | works |
+   | Standalone droplet | `https://mcp.innovatingwithcapella.com/mcp` | **never** — no auth DB |
+
+   The difference matters most for the client that needs it most. An agent
+   whose safety layer refuses to carry a raw PAT — which is correct behaviour,
+   and the reason `begin_connect` exists — can only use the co-deploy. On the
+   standalone it gets `Credential-free connect isn't configured on this
+   server`, which is accurate, permanent, and not a bug to report.
+
+   **Don't paste this URL into a system prompt and leave it there.** On
+   2026-11-15 a user's agent was reconnected using a URL copied out of an old
+   system prompt, reached the standalone, and produced a message identical to a
+   genuine server fault that had been fixed an hour earlier. Hand-typed
+   endpoints go stale silently. Set `CAPELLA_SERVER_LABEL` on each deployment
+   so its messages name the host that answered.
+
 4. Click **Refresh tool list** — you should see 12 tools
 
 **Tools available:**
@@ -500,6 +520,36 @@ EOF
 chmod 600 /etc/capella-mcp.env
 chown www-data:www-data /etc/capella-mcp.env
 ```
+
+Then append one more line **typed for the droplet you are standing on**, not
+pasted:
+
+```bash
+echo "CAPELLA_SERVER_LABEL=$(read -p 'hostname clients connect to: ' h; echo "$h")"   >> /etc/capella-mcp.env
+```
+
+`CAPELLA_SERVER_LABEL` is cosmetic to the server and load-bearing to whoever
+reads an error. Both deployments answer a failed connect with near-identical
+sentences, and naming the responder is the only thing that distinguishes a
+genuine server fault from a client pointed at the wrong box — which is exactly
+what happened on 2026-11-15, an hour apart, with the same message both times.
+
+Two ways to get it wrong:
+
+- **Do not paste a hostname from this document.** That is the mistake
+  LESSON-0005 records: a value copied from a recipe put a dev endpoint on a
+  production box. It is the same failure as a stale URL in a system prompt,
+  one layer down.
+- **Do not use `hostname`(1), and the server does not either.** The production
+  droplet still answers to its original name and prints `Cartenza-Dev`, so an
+  auto-detected label would confidently say the wrong thing. Unset is better
+  than wrong: the boot line reads `unnamed (set CAPELLA_SERVER_LABEL)` and
+  says nothing it cannot support.
+
+The server prints one line to stderr at boot stating whether `begin_connect` is
+live, and why not when it isn't. Check it with `journalctl -u capella-mcp -n 5`
+after a restart — kp-auth is an optional import, so its absence is otherwise
+completely silent.
 
 > **Why this section no longer names a hostname.** It used to hardcode
 > `KP_CONNECT_BASE_URL=https://dev.connect.cartenza.ai` in this very recipe —
