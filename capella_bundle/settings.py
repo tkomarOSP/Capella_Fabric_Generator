@@ -48,7 +48,7 @@ library refuses to default a service name at all.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Optional
 
@@ -562,6 +562,38 @@ def upsert_model(profile: Profile, entry: ModelEntry) -> Profile:
             f"cloned and then ignored. Remove the duplicates on the setup page."
         )
     return profile.upsert(entry)
+
+
+def remove_dependency(profile: Profile, nickname: str, resource_name: str,
+                      store: Optional[CredentialStore] = None) -> Profile:
+    """Drop one library from a model, and its credential with it.
+
+    Here rather than in the setup page's handler, for the same reason
+    ``remove_model`` is: the credential lives in a second place the entry
+    knows nothing about, so a caller that forgot would leave a stored token
+    behind with nothing left referring to it. One function, one place to get
+    it right.
+
+    The library's **clone is deliberately left on disk**, as
+    ``remove_model``'s is. Taking a declaration out of a list should not
+    delete a repository the engineer may have waited minutes for, and it is
+    recoverable in no other way.
+    """
+    store = store or credential_store()
+    entry = profile.find(nickname)
+    wanted = resource_name.strip().lower()
+    kept = tuple(d for d in entry.dependencies
+                 if d.resource_name.strip().lower() != wanted)
+    if len(kept) == len(entry.dependencies):
+        raise SettingsError(
+            f"Model {entry.nickname!r} has no library called "
+            f"{resource_name!r}. Its libraries are: "
+            + (", ".join(repr(d.resource_name) for d in entry.dependencies)
+               or "none") + "."
+        )
+    store.delete(credential_account(
+        profile.name, dependency_account(entry.nickname, resource_name)))
+    return upsert_model(profile, replace(entry, dependencies=kept))
 
 
 def remove_model(profile: Profile, nickname: str,

@@ -611,18 +611,22 @@ if len(parsed) >= 2:
     check("tools/list returns the sixteen over the wire",
           len(names) == 16 and set(names) == LOCAL, str(names))
 
-# --setup with no setup page built yet: a reason on stderr and exit 1, never a
-# traceback and never a line on stdout.
-setup_run = subprocess.run(
-    [sys.executable, str(LAUNCHER), "--setup", "--no-browser"],
-    capture_output=True, text=True, timeout=300, cwd=str(ROOT), env=child_env)
-check("--setup exits 1 while there is no setup page",
-      setup_run.returncode == 1, f"{setup_run.returncode}: {setup_run.stderr[-300:]}")
-check("...with a sentence, not a traceback",
-      "Traceback" not in setup_run.stderr
-      and "setup page" in setup_run.stderr, setup_run.stderr[-300:])
-check("...and nothing on stdout", not setup_run.stdout.strip(),
-      setup_run.stdout[:200])
+# setup_model() hands over a loopback link with a one-time token. The page
+# itself, its guards and its forms are test_setup_page.py's subject; what is
+# asserted here is the tool's half of the contract -- that it returns a link
+# rather than a path or a command, and that the web application is reached
+# only from inside the function.
+handed = server.setup_model()
+check("setup_model returns a loopback url",
+      handed.get("url", "").startswith("http://127.0.0.1:"), str(handed)[:200])
+check("...carrying a one-time token", "token=" in handed.get("url", ""))
+check("...and tells the engineer what to do with it",
+      handed["url"] in handed.get("tell_the_engineer", ""), str(handed)[:300])
+check("...and does not fall back to a command line now that the page exists",
+      "run_this_instead" not in handed, str(handed)[:200])
+check("the setup page was imported inside the call, not at module scope",
+      "capella_bundle.setup_app" in sys.modules
+      and "capella_bundle.setup_app" not in loaded)
 
 print()
 if failures:

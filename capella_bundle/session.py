@@ -369,6 +369,208 @@ def is_prepared(cfg: ModelConfig) -> bool:
     return _is_work_tree(cfg.clone_dir)
 
 
+# ---------------------------------------------------------------------------
+# Verifying, one question at a time
+# ---------------------------------------------------------------------------
+
+#: A ref name a dry-run push aims at, so the probe asks for *write* access
+#: rather than pushing anything. Nothing is created: ``--dry-run`` stops
+#: before the ref update. Naming it after this product means a ref that does
+#: somehow appear on a remote is immediately attributable.
+PUSH_PROBE_REF = "refs/heads/capella-fabric-access-probe"
+
+PUSH_PROBE_TIMEOUT = 60
+
+
+def _remote_heads(remote: Remote) -> tuple[set[str], str]:
+    """The branch names a remote advertises, or a message saying why not.
+
+    One ``ls-remote``, which reads nothing and writes nothing, and the
+    cheapest question that proves a credential works against *this*
+    repository rather than merely against the host.
+    """
+    args = []
+    url = remote.url
+    if remote.has_credential:
+        mechanism = remote.mechanism or gitwork.auth_candidates(remote.url)[0]
+        args = gitwork.auth_config_args(remote.pat, mechanism)
+        url = gitwork.auth_url(remote.url, remote.pat, mechanism)
+    result = gitwork.run_git(*args, "ls-remote", "--heads", url,
+                             timeout=GIT_NETWORK_TIMEOUT)
+    if result.returncode != 0:
+        reason = (result.stderr or result.stdout or "").strip()
+        if gitwork.timed_out(result):
+            reason = "the remote did not answer in time"
+        return set(), remote.scrub(reason) or "git gave no reason"
+    heads = set()
+    for line in result.stdout.splitlines():
+        parts = line.split("\t")
+        if len(parts) == 2 and parts[1].startswith("refs/heads/"):
+            heads.add(parts[1][len("refs/heads/"):])
+    return heads, ""
+
+
+def _push_probe(cfg: ModelConfig) -> tuple[Optional[bool], str]:
+    """Whether this credential may **write** to the remote.
+
+    ``git push --dry-run`` at a ref that does not exist. The dry run stops
+    before any ref is updated, so nothing is created -- but the remote's
+    ``git-receive-pack`` still has to accept the connection, and a read-only
+    credential is refused there. That is the only honest way to answer this:
+    ``ls-remote`` speaks to ``git-upload-pack``, which a read-only token is
+    perfectly entitled to use, so a reachable repository says nothing at all
+    about whether a push will land.
+
+    Returns ``(True | False | None, detail)``. ``None`` means not determined
+    -- there is no clone yet to push *from*, which is the usual answer before
+    the first clone and is not a failure.
+
+    Why it matters enough to cost a round trip: a push refused for permissions
+    is discovered *after* an agent has patched a model and told the engineer
+    the change was made. The same reasoning as the write ceiling, one layer
+    further out.
+    """
+    if not _is_work_tree(cfg.clone_dir):
+        return None, ("There is no clone yet to push from, so this cannot be "
+                      "answered until the model is cloned.")
+    refresh_credential(cfg)
+    result = gitwork.run_local_git(
+        cfg.clone_dir, "push", "--dry-run", "origin",
+        f"HEAD:{PUSH_PROBE_REF}", timeout=PUSH_PROBE_TIMEOUT)
+    # The library returns None for a command that hung, deliberately leaving
+    # the caller to decide. Here it is "unknown" rather than "refused": a
+    # remote that stopped answering has not declined anything, and reporting
+    # it as no write access would send the engineer to fix a token that is
+    # fine.
+    if result is None:
+        return None, ("The remote did not answer within "
+                      f"{PUSH_PROBE_TIMEOUT} seconds, so this is unknown "
+                      "rather than refused.")
+    if result.returncode == 0:
+        return True, ("A dry-run push was accepted, so this credential may "
+                      "write. Nothing was pushed.")
+    reason = (result.stderr or result.stdout or "").strip()
+    return False, _remote_for(cfg).scrub(reason) or "git gave no reason"
+
+
+def verify(cfg: ModelConfig, dependency_pats: Optional[dict[str, str]] = None
+           ) -> list[dict[str, Any]]:
+    """Answer the four questions a model has to pass, in the order they bite.
+
+    **reachable -> branch -> push access -> model present.** The order is not
+    cosmetic: each answer makes the next question meaningful, and a failure
+    high up makes everything below it unanswerable rather than failing. A
+    wrong token reported as "no .aird found" is the kind of message that sends
+    an engineer looking in the repository for a file that is there.
+
+    Returns one record per question: ``{"step", "ok", "detail"}`` with ``ok``
+    True, False, or **None for not determined** -- which is a real answer and
+    not a hedge. Two of these genuinely cannot be settled without a clone, and
+    saying so beats guessing or leaving the row out.
+
+    Never raises. Every caller is a page the engineer is looking at, and a
+    verification that throws is a verification that tells them nothing.
+    """
+    steps: list[dict[str, Any]] = []
+
+    def record(step: str, ok: Optional[bool], detail: str) -> None:
+        steps.append({"step": step, "ok": ok, "detail": detail})
+
+    try:
+        require_git()
+    except Exception as exc:
+        record("git on PATH", False, str(exc))
+        return steps
+
+    remote = _remote_for(cfg)
+
+    # 1. Reachable. Also where a credential is proved, because "the host
+    #    answered" and "the host accepted this token" are one question to
+    #    ls-remote and two very different messages to an engineer.
+    heads, problem = _remote_heads(remote)
+    if problem:
+        record("repository reachable", False, problem + (
+            gitwork.PUBLIC_HINT if remote.public_readonly else ""))
+        for later in ("branch present", "push access", "Capella model present"):
+            record(later, None, "Not checked: the repository could not be read.")
+        return steps
+    record("repository reachable", True,
+           f"{len(heads)} branch(es) advertised"
+           + ("" if remote.has_credential
+              else " with no credential, so it is public or local"))
+
+    # 2. The branch. Checked against the advertised list rather than by
+    #    cloning and failing, because a wrong branch is the likeliest cause of
+    #    a clone that succeeds and contains no model -- and finding that out
+    #    costs the whole download first.
+    if cfg.branch in heads:
+        record("branch present", True, f"{cfg.branch!r} is on the remote")
+    else:
+        listed = ", ".join(sorted(heads)[:12]) or "none"
+        record("branch present", False,
+               f"The remote has no branch called {cfg.branch!r}. It offers: "
+               f"{listed}. Change the branch for {cfg.name!r} above.")
+
+    # 3. Write access, and only when write is what was asked for. Probing a
+    #    model the engineer deliberately marked read-only would report a
+    #    refusal as a problem when it is the configuration working.
+    if cfg.read_only:
+        record("push access", None,
+               f"Not checked: {cfg.name!r} is configured for reading only, so "
+               f"a push would be refused by this server before git saw it.")
+    else:
+        ok, detail = _push_probe(cfg)
+        record("push access", ok, detail)
+
+    # 4. The model itself. Only the clone can answer this -- a remote
+    #    advertises refs, not a file listing -- so before the first clone the
+    #    honest answer is that cloning is what settles it, and prepare()
+    #    already reports a clone with no .aird precisely rather than leaving
+    #    the engineer to guess at the branch.
+    if not _is_work_tree(cfg.clone_dir):
+        record("Capella model present", None,
+               "Not checked: this is answered by the clone, which has not "
+               "been made yet. Save the model to clone it.")
+    else:
+        aird = find_aird(cfg.clone_dir)
+        if aird is None:
+            record("Capella model present", False,
+                   f"The clone at {cfg.clone_dir} contains no .aird file, so "
+                   f"it is not a Capella model. The likeliest cause is the "
+                   f"branch rather than the repository.")
+        else:
+            record("Capella model present", True,
+                   f"{aird.name} in {aird.parent}")
+
+    # The libraries, each asked the same first two questions. A missing
+    # library is reported here rather than discovered when capellambse fails
+    # to resolve a cross-reference and blames the main model.
+    for dep in cfg.dependencies:
+        pat = (dependency_pats or {}).get(dep.resource_name, "")
+        dep_remote = _remote_for_dependency(dep, pat)
+        label = f"library {dep.resource_name!r}"
+        dep_heads, dep_problem = _remote_heads(dep_remote)
+        if dep_problem:
+            record(label, False, dep_problem + (
+                gitwork.PUBLIC_HINT if dep_remote.public_readonly else ""))
+            continue
+        target = dep.resolved_clone_dir(cfg.model_dir)
+        if dep.branch not in dep_heads:
+            record(label, False,
+                   f"Reachable, but it has no branch called {dep.branch!r}.")
+        elif _is_work_tree(target) and find_aird(target) is None:
+            record(label, False,
+                   f"Cloned to {target}, but it contains no .aird file, so "
+                   f"cross-references into it will not resolve.")
+        elif _is_work_tree(target):
+            record(label, True, f"On disk at {target}")
+        else:
+            record(label, None,
+                   f"Reachable on branch {dep.branch!r}, not cloned yet.")
+
+    return steps
+
+
 def _probe(remote: Remote, label: str) -> Remote:
     """Find out which credential mechanism this remote accepts, once.
 
@@ -455,12 +657,33 @@ def prepare(cfg: ModelConfig, dependency_pats: Optional[dict[str, str]] = None
     the lesson kept is that a long operation inside a tool call is a long
     operation nobody can see.
 
-    Idempotent: a model already on disk is simply opened.
+    Idempotent: a model already on disk is simply opened -- but its
+    **libraries are still reconciled**, which is not the same thing and was
+    briefly wrong here. A library is declared on the setup page after the
+    model has been cloned, which is the normal order: the engineer adds the
+    model, Capella tells them a cross-reference is unresolved, and they come
+    back and declare the library. Returning early on "the model is on disk"
+    meant that library was recorded and never cloned, and nothing said so
+    until capellambse failed to resolve a reference and blamed the main
+    model. ``open_model`` cannot do this -- it never clones, by design -- so
+    it belongs here, in the one function that is allowed to.
     """
     require_git()
 
     if _is_work_tree(cfg.clone_dir):
-        return open_model(cfg)
+        added = [
+            prepare_dependency(cfg, dep,
+                               (dependency_pats or {}).get(dep.resource_name, ""))
+            for dep in cfg.dependencies
+            if not _is_work_tree(dep.resolved_clone_dir(cfg.model_dir))
+        ]
+        # Opened afterwards, so the session record it writes lists the
+        # libraries that now exist. Opening first would write a `resources`
+        # mapping that is missing exactly the library just cloned.
+        result = open_model(cfg)
+        if added:
+            result["dependencies_cloned"] = added
+        return result
 
     if cfg.clone_dir.exists() and any(cfg.clone_dir.iterdir()):
         raise ModelError(
