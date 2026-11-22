@@ -306,8 +306,16 @@ check("a level clone is not refused",
 behind = cfg("write").write_refusal({"synced": False, "behind": 3,
                                      "sync_error": "could not fast-forward"})
 check("a clone behind the remote is refused", bool(behind))
-check("...and says why a single file makes it worse",
-      "single file" in (behind or "") and "revert" in (behind or ""), behind or "")
+# Corrected 2026-11-22, measured against the real Residential_AC. This used to
+# pin "single file" and "revert", from a claim that a stale push "replaces the
+# newer file wholesale and reverts whatever landed in between, reporting
+# success". Staged for real, git rejects such a push as a non-fast-forward and
+# the remote is untouched -- so the refusal was right and its reason was not.
+check("...and says the patch would be built on content already replaced",
+      "already replaced" in (behind or ""), behind or "")
+check("...and that the push would be rejected, not silently accepted",
+      "rejected" in (behind or "") and "wholesale" not in (behind or ""),
+      behind or "")
 check("...and names the call that fixes it", "open_model" in (behind or ""))
 diverged = cfg("write").write_refusal({"synced": False, "diverged": True,
                                        "behind": 1, "ahead": 1,

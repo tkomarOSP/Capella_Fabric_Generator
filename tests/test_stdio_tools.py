@@ -455,10 +455,20 @@ server._OPEN[AC_SID] = (ac_cfg, {"synced": False, "behind": 2,
 behind = raises("a patch onto a clone behind its remote is refused",
                 lambda: server.apply_model_patch(AC_SID, PATCH, "nope"),
                 saying="behind")
-check("...and the refusal explains that a model is a single file",
-      "single file" in behind.lower(), behind)
-check("...and that pushing it would revert someone else's work",
-      "revert" in behind.lower(), behind)
+# The wording these two pinned was corrected on 2026-11-22 after being
+# measured against the real Residential_AC. It claimed a stale push "replaces
+# the newer file wholesale and reverts whatever landed in between, reporting
+# success". It does not: git rejects it as a non-fast-forward and the remote is
+# untouched. The refusal is still right -- the patch is wasted and the
+# engineer is left with a divergence to reconcile -- but for the real reason.
+check("...and the refusal explains the patch would be built on replaced content",
+      "already replaced" in behind.lower(), behind)
+check("...and that the push would then be rejected",
+      "rejected" in behind.lower() and "non-fast-forward" in behind.lower(),
+      behind)
+check("...and does not claim a stale push silently succeeds",
+      "wholesale" not in behind.lower()
+      and "reporting success" not in behind.lower(), behind)
 check("...and says to call open_model again rather than offering a git fix",
       "open_model again" in behind, behind)
 server._OPEN[AC_SID] = (ac_cfg, dict(opened))     # put it back as it was

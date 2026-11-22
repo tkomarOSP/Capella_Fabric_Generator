@@ -125,11 +125,12 @@ their own machine before that.
 A write can be refused for three reasons, and all three are stated with the \
 model rather than discovered at push time. The model's access may be "read", \
 which is the engineer's declaration and a setting on the setup page. Or this \
-clone may be BEHIND the remote: a Capella model is a single file, so patching \
-a stale copy and pushing it does not conflict -- it replaces the newer file \
-wholesale and reverts whatever landed in between, reporting success. Call \
-open_model again to fetch, then patch. Or the two histories may have \
-DIVERGED, with commits on both sides.
+clone may be BEHIND the remote, in which case a patch would be built on model \
+content somebody has already replaced: the push is then rejected as a \
+non-fast-forward, after you have written the patch and told the engineer it \
+was applied, and resolving that rejection means reconciling a divergence this \
+server will not reconcile. Call open_model again to fetch, then patch. Or the \
+two histories may have DIVERGED already, with commits on both sides.
 
 A DIVERGENCE IS NOT YOURS TO RESOLVE. This server does not replay commits \
 across one, deliberately: a Capella model is one file and git merges it \

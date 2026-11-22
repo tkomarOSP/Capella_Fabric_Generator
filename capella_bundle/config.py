@@ -334,9 +334,9 @@ class ModelConfig:
             f"itself, because a Capella model is one file and a textual "
             f"rebase of it can succeed and still produce a model Capella "
             f"cannot open; and a patch is refused while this clone is behind "
-            f"the remote, because the model is a single file and patching a "
-            f"stale copy of it reverts whatever landed in between. Open the "
-            f"model again to fetch, then patch."
+            f"the remote, because a patch built on content somebody has "
+            f"already replaced ends in a rejected push and a divergence to "
+            f"reconcile. Open the model again to fetch, then patch."
         )
 
     def write_refusal(self, sync: Optional[dict[str, Any]] = None) -> Optional[str]:
@@ -401,10 +401,13 @@ class ModelConfig:
             return (
                 f"{self.name!r} is {behind} commit(s) behind its remote and "
                 f"was not fast-forwarded, so this clone is stale. Nothing has "
-                f"been changed. A Capella model is a single file: patching a "
-                f"stale copy and pushing it does not conflict, it replaces "
-                f"the newer file wholesale and reverts whatever landed in "
-                f"between. Call open_model again to fetch, then patch. "
+                f"been changed. A patch applied here would be built on model "
+                f"content somebody has already replaced, and the push would "
+                f"then be rejected as a non-fast-forward -- after the patch "
+                f"had been written and reported as done. Worse, resolving "
+                f"that rejection means reconciling a divergence this server "
+                f"will not reconcile. Call open_model again to fetch, then "
+                f"patch. "
                 f"{sync.get('sync_error') or sync.get('sync_note') or ''}".strip()
             )
         return None
