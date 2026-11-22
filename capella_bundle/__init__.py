@@ -39,6 +39,7 @@ forever.
   measured half.
 * ``session`` -- one permanent clone, the derived session id, ``open_model``
   and the ``capella_service`` adapter.
+* ``instructions`` -- what a client is told at connect time.
 """
 
 from __future__ import annotations
@@ -51,4 +52,4 @@ from capella_bundle import foundation as _foundation
 # repeating it.
 _foundation.ensure_all()
 
-__all__ = ["foundation", "config", "settings", "session"]
+__all__ = ["foundation", "config", "settings", "session", "instructions"]

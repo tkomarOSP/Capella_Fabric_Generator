@@ -277,7 +277,7 @@ def _remote_for_dependency(dep: Dependency, pat: str) -> Remote:
     return Remote(url=dep.remote_url, branch=dep.branch, pat=pat, auth=dep.auth)
 
 
-def _point_origin_at_current_credential(cfg: ModelConfig) -> None:
+def refresh_credential(cfg: ModelConfig) -> None:
     """Re-apply the credential the profile holds **this** run.
 
     The clone bakes it into ``origin`` (basic auth) or into
@@ -295,7 +295,7 @@ def _point_origin_at_current_credential(cfg: ModelConfig) -> None:
                             user_name=COMMIT_NAME, user_email=COMMIT_EMAIL)
 
 
-def _fast_forward(cfg: ModelConfig) -> dict[str, Any]:
+def fast_forward(cfg: ModelConfig) -> dict[str, Any]:
     """Fetch, then bring the clone into step, and say which happened.
 
     All of it is ``gitwork.sync``. Two arguments are this product's:
@@ -314,7 +314,7 @@ def _fast_forward(cfg: ModelConfig) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def _aird_in(directory: Path) -> Optional[Path]:
+def find_aird(directory: Path) -> Optional[Path]:
     """The first ``.aird`` under a directory, or None.
 
     Sorted, so a model with more than one ``.aird`` resolves to the same file
@@ -404,7 +404,7 @@ def prepare_dependency(cfg: ModelConfig, dep: Dependency,
     target = dep.resolved_clone_dir(cfg.model_dir)
 
     if _is_work_tree(target):
-        aird = _aird_in(target)
+        aird = find_aird(target)
         return {"resource_name": dep.resource_name, "first_use": False,
                 "auth": dep.auth, "clone_dir": str(target),
                 "model_folder": str(aird.parent) if aird else None,
@@ -428,7 +428,7 @@ def prepare_dependency(cfg: ModelConfig, dep: Dependency,
     gitwork.configure_clone(target, remote,
                             user_name=COMMIT_NAME, user_email=COMMIT_EMAIL)
 
-    aird = _aird_in(target)
+    aird = find_aird(target)
     if aird is None:
         raise ModelError(
             f"The library {dep.resource_name!r} was cloned from "
@@ -483,7 +483,7 @@ def prepare(cfg: ModelConfig, dependency_pats: Optional[dict[str, str]] = None
     identity_problems = gitwork.configure_clone(
         cfg.clone_dir, remote, user_name=COMMIT_NAME, user_email=COMMIT_EMAIL)
 
-    aird_path = _aird_in(cfg.clone_dir)
+    aird_path = find_aird(cfg.clone_dir)
     if aird_path is None:
         # Deliberately NOT deleted, which is where this parts company with the
         # hosted server: there, a failed clone's temp directory is swept and
@@ -573,10 +573,10 @@ def open_model(cfg: ModelConfig) -> dict[str, Any]:
             f"this model its own directory on the setup page."
         )
 
-    _point_origin_at_current_credential(cfg)
-    sync = _fast_forward(cfg)
+    refresh_credential(cfg)
+    sync = fast_forward(cfg)
 
-    aird_path = _aird_in(cfg.clone_dir)
+    aird_path = find_aird(cfg.clone_dir)
     if aird_path is None:
         raise ModelError(
             f"The clone at {cfg.clone_dir} no longer contains an .aird file, "

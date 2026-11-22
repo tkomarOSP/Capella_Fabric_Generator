@@ -374,7 +374,7 @@ tokened = cfg("Tokened", TOKENED, model_dir=tokened_dir, pat=SECRET)
 check("the config really is carrying the token", tokened.pat == SECRET)
 
 record = session.write_session_record(
-    tokened, session.session_id_for(tokened), session._aird_in(tokened.clone_dir))
+    tokened, session.session_id_for(tokened), session.find_aird(tokened.clone_dir))
 check("**session.json does not contain the token**",
       SECRET not in (tokened.model_dir / "session.json").read_text(encoding="utf-8"))
 check("...nor does the record that was returned", SECRET not in json.dumps(record))
