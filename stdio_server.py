@@ -222,58 +222,76 @@ def _publish(cfg: ModelConfig, path: Path, *, move: bool) -> Path:
     return target
 
 
-def _links(cfg: ModelConfig, target: Path) -> dict[str, Any]:
-    """How to hand this artifact over.
+def _links(cfg: ModelConfig, target: Optional[Path] = None) -> dict[str, Any]:
+    """How to hand an artifact over: a link, or the file's own path.
 
-    A loopback URL once the local page server is running, and the file's own
-    path until then. The path is never offered *as* a link: a path is not a
-    link, a chat window will not open one, and the engineer is left copying it
-    into a browser by hand. So the two cases say different things.
+    ``target`` is the file to link to, or ``None`` for the model's index of
+    everything it has produced.
+
+    The path is never offered *as* a link. A path is not a link, a chat window
+    will not open one, and the engineer is left copying it into a browser by
+    hand -- which is the complaint this whole mechanism answers. So the two
+    cases say different things rather than the same thing with a field
+    missing.
     """
-    site = _page_site()
-    if site is None:
+    pages = _pages()
+    if pages is None:
+        if target is None:
+            return {"views_dir": str(cfg.views_dir)}
         return {
             "path": str(target),
             "viewer_note": (
                 f"This page is self-contained and opens in any browser from "
-                f"{target}. No local page server is running in this build, so "
-                f"there is no link to hand over yet -- tell the engineer the "
-                f"file is there rather than presenting the path as something "
-                f"to click."
+                f"{target}. No page server is available in this build, so "
+                f"there is no link to hand over -- tell the engineer the file "
+                f"is there rather than presenting the path as something to "
+                f"click."
             ),
         }
-    url = site.link_for(cfg.name, target.name)
+    try:
+        # Rewritten before the link rather than on a schedule: this is the
+        # moment the directory's contents changed, and the index is built from
+        # the directory rather than from anything remembered.
+        pages.write_index(cfg)
+        url = pages.link_for(cfg, target.name if target is not None else "")
+    except Exception as exc:
+        # A link is never worth a failed render. The file is on disk and
+        # `path` still names it.
+        return {"path": str(target) if target is not None else "",
+                "views_dir": str(cfg.views_dir),
+                "viewer_error": f"The page could not be served: {exc}"}
+
+    label = target.name if target is not None else f"{cfg.name} — rendered views"
     return {
-        "path": str(target),
+        **({"path": str(target)} if target is not None else {}),
         "url": url,
-        "viewer_markdown": f"[{target.name}]({url})",
+        "viewer_markdown": f"[{label}]({url})",
         "viewer_note": (
             "Give the engineer the markdown above verbatim, on its own line. "
-            "It is served on this machine's loopback interface only and lasts "
-            "as long as this server runs."
+            "It is served on this machine's loopback interface only, and the "
+            "link lasts as long as this server runs -- so issue a fresh one "
+            "rather than repeating an old one."
         ),
     }
 
 
-def _page_site():
-    """The loopback page server, if this build serves pages. Else None.
+def _pages():
+    """The page-server module, if this build serves pages. Else None.
 
     One seam, read by ``_links`` alone, so that the tools below are written
     once against both cases rather than twice. ``generate_viewer_link`` and
-    ``render_diagram_view`` are complete and correct without it -- the pages
-    they produce are self-contained files -- and gain a clickable link when it
-    is there.
+    ``render_diagram_view`` are correct without it -- the pages they produce
+    are self-contained files -- and gain a clickable link when it is there.
 
-    Failure here degrades to None rather than raising, and that is the
-    notebook's lesson rather than caution for its own sake: a render or a
-    fabric that worked perfectly well must not come back as an error because
-    a local web server would not start. The file is on disk either way, and
-    ``_links`` still names it.
+    Failure degrades to None rather than raising, and that is the notebook's
+    lesson rather than caution for its own sake: a render or a fabric that
+    worked perfectly well must not come back as an error because a local web
+    server would not start.
     """
     try:
         from capella_bundle import page_server  # noqa: PLC0415
 
-        return page_server.site()
+        return page_server
     except Exception:
         return None
 
@@ -763,19 +781,24 @@ def generate_viewer_link(session_id: str, filename: str = "") -> dict:
     wanted = (filename or "").strip()
 
     if not wanted:
+        # The index page is itself a file in this directory, so it is left out
+        # of the listing: an agent offered "index.html" among the renders
+        # would hand it over as though it were one.
         produced = sorted(
-            (p for p in cfg.views_dir.glob("*") if p.is_file()),
+            (p for p in cfg.views_dir.glob("*")
+             if p.is_file() and p.name != "index.html"),
             key=lambda p: p.stat().st_mtime, reverse=True,
         ) if cfg.views_dir.is_dir() else []
         return {
             "model": cfg.name,
             "produced": [p.name for p in produced],
-            "then": ("Call generate_viewer_link(filename=...) for one of "
-                     "these, or render_diagram_view to make a new one."
+            "then": ("The link above opens an index of all of these. For one "
+                     "file on its own, call generate_viewer_link(filename=...)."
                      if produced else
                      "Nothing has been rendered or generated for this model "
                      "yet. Call render_diagram_view or generate_fabric "
                      "first."),
+            **_links(cfg),
         }
 
     # Name only, never a path: a caller passing "../../unpacked/.git/config"

@@ -354,11 +354,21 @@ check("a fabric is copied, and the original stays put",
       copied.is_file() and fabric.is_file())
 
 links = server._links(ac_cfg, published)
-check("with no page server there is no url", "url" not in links, str(links))
-check("...and no markdown presented as a link",
-      "viewer_markdown" not in links, str(links))
-check("...but the file's own path, and where to find it",
-      links["path"] == str(published) and "browser" in links["viewer_note"])
+# This block asserted the *absence* of a url when it was written, because the
+# page server did not exist yet. It does now, so the assertion that survives
+# is the one about what `_links` always promises: the file's own path beside
+# whatever link there is. The degradation path -- no page module at all -- is
+# tested where it belongs, in test_views_loopback.py, by removing the module.
+check("the file's own path is always reported",
+      links["path"] == str(published), str(links))
+check("...with a loopback link beside it now that pages are served",
+      links.get("url", "").startswith("http://127.0.0.1:"), str(links)[:200])
+check("...and markdown naming the file rather than the path",
+      links.get("viewer_markdown", "").startswith(f"[{published.name}](http://"),
+      links.get("viewer_markdown", ""))
+check("...and no credential anywhere in it",
+      "oauth2" not in str(links) and ac_cfg.pat not in str(links)
+      if ac_cfg.pat else "oauth2" not in str(links), str(links)[:200])
 
 # ---------------------------------------------------------------------------
 print("\n5. generate_viewer_link takes a name, never a path")
