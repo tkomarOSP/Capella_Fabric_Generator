@@ -425,6 +425,40 @@ def _library_section(profile: Profile, editing: Optional[ModelEntry], store) -> 
 </section>"""
 
 
+def _capella_tools_in_use() -> str:
+    r"""Which ``capella_tools`` was actually imported -- not which was asked for.
+
+    ``capella_service`` reads ``CAPELLA_TOOLS_PATH``, falling back to a
+    hard-coded ``C:\apps\.metadata\Capella_Tools``, and inserts it at
+    ``sys.path[0]``. Reporting that *configured* path is what this row used to
+    do, and it is the wrong question: an insert only wins if nothing has
+    already imported the package, and a machine may hold more than one
+    checkout. So the row showed a plausible directory while the fabric was
+    being built from somewhere else.
+
+    Measured on 2026-11-22, and the reason this row changed: this machine
+    holds two checkouts, the hard-coded default was 24 commits behind the
+    maintained one, and the difference was not cosmetic. The stale copy
+    emitted a fabric that **PyYAML cannot parse** -- an unquoted name
+    containing a colon -- carried no ``is_actor`` field at all, which is one
+    of the three model facts the connect-time instructions teach an agent to
+    rely on, and named both ends of an exchange ``ref_uuid`` and
+    ``ref__uuid`` rather than source and target. None of that raises. It
+    returns 600 KB of YAML-shaped text and a success.
+
+    A path cannot say which file was loaded, so report the file.
+    """
+    loaded = sys.modules.get("capella_tools.capellambse_yaml_manager")
+    where = getattr(loaded, "__file__", "") if loaded else ""
+    if where:
+        return where
+    configured = os.environ.get("CAPELLA_TOOLS_PATH", "")
+    service = sys.modules.get("capella_service")
+    resolved = str(getattr(service, "_CAPELLA_TOOLS", "")) if service else ""
+    asked = configured or resolved or "(CAPELLA_TOOLS_PATH unset)"
+    return f"not imported in this process -- configured: {asked}"
+
+
 def _diagnostics(profile: Profile) -> str:
     """What this server was actually launched with.
 
@@ -456,8 +490,7 @@ def _diagnostics(profile: Profile) -> str:
         ("Credential store",
          getattr(bsettings.credential_store(), "label", "unknown")),
         ("git", shutil.which("git") or "not found on PATH"),
-        ("Capella_Tools", os.environ.get("CAPELLA_TOOLS_PATH",
-                                         r"C:\apps\.metadata\Capella_Tools")),
+        ("Capella_Tools", _capella_tools_in_use()),
         ("Harness variables set", ", ".join(harness_vars) if harness_vars
          else "none — the harness passed nothing of its own"),
     ]

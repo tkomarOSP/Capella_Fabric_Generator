@@ -518,6 +518,82 @@ check("the start-up banner went to stderr", "Capella Fabric" in stderr,
 check("...and nothing crashed on the way down", "Traceback" not in stderr,
       stderr[-400:])
 
+# ---------------------------------------------------------------------------
+print("\n7. The setup document still describes this server")
+# ---------------------------------------------------------------------------
+# A setup document is the one artifact nobody re-reads until it has already
+# misled somebody, and every claim in it is a fact about code that moves. So
+# the checkable claims are checked here rather than trusted: the tool count,
+# the launcher's name, the environment variables, the namespace constants and
+# the on-disk directories. The notebook's own document has no equivalent and
+# has drifted at least once.
+
+DOC = REPO / "docs" / "CAPELLA_FABRIC_BUNDLE_SETUP.md"
+check("the setup document exists", DOC.is_file(), str(DOC))
+doc = DOC.read_text(encoding="utf-8") if DOC.is_file() else ""
+
+check("it names the launcher, and the launcher is there",
+      "run_capella_fabric.py" in doc
+      and (REPO / "run_capella_fabric.py").is_file())
+
+check("**the tool count it tells the engineer to expect is the real one**",
+      f"**{len(in_process)}** tools" in doc,
+      f"registered {len(in_process)}; document says "
+      + (re.search(r"list \*\*(\d+)\*\* tools", doc) or ["(nothing)"])[0])
+
+# Every tool the document writes as a CALL must be registered. A document
+# naming a tool that does not exist sends an engineer looking for it in a
+# tool list, and sends an agent calling it on the first turn.
+# Every tool name the document prints in backticks must be a registered
+# tool. Matched on the shape every name here has -- a verb, an
+# underscore, a noun -- rather than on parentheses, because the document
+# mostly writes them bare, and a parentheses-only rule found two of five
+# and called that a pass.
+TOOL_VERBS = ("open", "close", "list", "browse", "search", "resolve",
+              "verify", "generate", "render", "apply", "push", "pull",
+              "setup", "use", "clone", "begin", "add")
+backticked = set(re.findall(r"`(\w+)(?:\(\))?`", doc))
+tool_calls = {name for name in backticked
+              if "_" in name and name.split("_")[0] in TOOL_VERBS}
+check("the document names several tools by name", len(tool_calls) >= 4,
+      str(sorted(tool_calls)))
+for name in sorted(tool_calls):
+    check(f"...`{name}()` is a tool that exists", name in EXPECTED,
+          f"not registered; registered: {sorted(EXPECTED)}")
+
+for absent in sorted(MUST_BE_ABSENT):
+    check(f"...and it never tells anyone to call {absent}",
+          f"{absent}(" not in doc)
+
+# The two environment variables are the whole configurable surface, and both
+# are read in code rather than being documentation-only advice.
+for var, where in (("CAPELLA_TOOLS_PATH", REPO / "capella_service.py"),
+                   ("MCP_DESKTOP_HOME", REPO / "capella_bundle" / "foundation.py")):
+    check(f"the document names {var}", var in doc)
+    check(f"...and {var} is actually read in {where.name}",
+          var in where.read_text(encoding="utf-8"), str(where))
+
+# The namespace constants land on disk and in the credential store, so a
+# document naming the wrong one sends somebody looking in the wrong place.
+check("it names this product's credential service",
+      "capella-fabric-local" in doc)
+check("it names this product's state directory",
+      "CapellaFabric" in doc)
+check("...and says the notebook's is separate", "Cartenza" in doc)
+for word in ("cartenza_setup", "cartenza_pages"):
+    check(f"...without naming the notebook's {word}", word not in doc)
+
+check("the directories it lists are the ones the code builds",
+      all(f"CapellaFabric" + chr(92) + part in doc
+          for part in ("profiles", "models", "views")),
+      "profiles/models/views under the state root")
+
+# The security property that decides the directory layout, stated rather
+# than left for a reader to infer -- views are outside the clone because the
+# clone permanently holds a credential in .git/config.
+check("**it says why views are kept outside the clone**",
+      ".git" in doc and "config" in doc and "credential" in doc)
+
 print()
 if failures:
     print(f"{len(failures)} CHECK(S) FAILED")

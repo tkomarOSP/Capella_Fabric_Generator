@@ -38,6 +38,7 @@ The cases, and why each is here:
    fetched from, with nothing on stdout.
 """
 
+import html
 import http.cookiejar
 import json
 import os
@@ -468,7 +469,52 @@ check("...and its credential is gone",
       not STORE.get(settings.credential_account("work", "ac")))
 
 # ---------------------------------------------------------------------------
-print("\n9. The launch command, and the foreground --setup path")
+print("\n9. Diagnostics name the Capella_Tools that was imported")
+# ---------------------------------------------------------------------------
+# A path cannot say which file was loaded. capella_service inserts
+# CAPELLA_TOOLS_PATH -- or a hard-coded default -- at sys.path[0] and imports
+# capella_tools from whatever wins, so on a machine holding two checkouts the
+# configured directory and the loaded module are different answers. Measured
+# on 2026-11-22: the default was 24 commits behind the maintained checkout,
+# and the stale copy's generate_fabric returned 600 KB of YAML-shaped text
+# that PyYAML refuses to parse, with no is_actor field anywhere. It raises
+# nothing, so the page is where an engineer finds out.
+import capella_tools.capellambse_yaml_manager as _yaml_manager  # noqa: E402
+
+status, body, _headers = fetch("/")
+check("the diagnostics section is on the page",
+      "what this server was launched with" in body, body[:200])
+
+loaded_file = _yaml_manager.__file__
+check("**the Capella_Tools row names the loaded module, not a directory**",
+      html.escape(loaded_file) in body,
+      f"looked for {loaded_file} in the page")
+check("...so it ends at the module file rather than the package root",
+      loaded_file.endswith("capellambse_yaml_manager.py"), loaded_file)
+
+# The control: this machine's loaded module is NOT under the configured
+# directory, so "the row happens to contain the right string" cannot be
+# satisfied by printing the configured path instead. Without this, a row that
+# still showed CAPELLA_TOOLS_PATH would pass on any machine where the two
+# agree -- which is most of them, and none of the broken ones.
+configured = os.environ.get("CAPELLA_TOOLS_PATH", "")
+if configured:
+    check("...and the row is not merely the configured directory",
+          configured.rstrip('\\/') != loaded_file, configured)
+else:
+    check("...and the row is not the bare default directory either",
+          "metadata" not in body.lower()
+          or loaded_file.lower().find("metadata") >= 0,
+          "page mentions the default path without the module having come "
+          "from there")
+
+check("the helper answers even before anything imported capella_tools",
+      "configured:" in setup_app._capella_tools_in_use()
+      or setup_app._capella_tools_in_use().endswith(".py"),
+      setup_app._capella_tools_in_use())
+
+# ---------------------------------------------------------------------------
+print("\n10. The launch command, and the foreground --setup path")
 # ---------------------------------------------------------------------------
 
 command = setup_app.launch_command()
