@@ -157,13 +157,26 @@ The app will now be reachable at `http://165.22.188.83/`.
 
 ## Updating the app (git pull workflow)
 
-> **Update `/opt/capella_tools` BEFORE pulling the app, once.** Since
-> obs-0013, `generate_fabric` parses its own output and **refuses** rather
-> than returning YAML-shaped text no parser accepts. That is the point of it,
-> and it means a `/opt/capella_tools` still on the old
-> `feature/capella-7.0.1-support` branch goes from silently returning a fabric
-> with no `is_actor` field to failing every fabric call outright. Correct, and
-> very visible. So on the first deploy after this change:
+**There are two deployments** — see *Connect from claude.ai* below — and they
+update separately. Everything in this section is **per deployment**.
+
+> **`/opt/capella_tools` and the fabric parse check: checked 2026-11-23, no
+> action needed.** Since obs-0013 `generate_fabric` parses its own output and
+> **refuses** rather than handing back YAML-shaped text no parser accepts. That
+> is the point of it, and it means a `/opt/capella_tools` that is behind stops
+> being quietly wrong and starts failing every fabric call outright — correct,
+> and very visible.
+>
+> Both deployments were checked on 2026-11-23 and **both already carry the four
+> fixes the check validates** (`is_actor` on every component, a uuid destroyed by
+> duplicate YAML keys, escaping for YAML rather than HTML, and quoting a name
+> YAML would misread): the co-deploy sat on `master` exactly, the standalone one
+> test-only commit behind it. **So the ordering below is a contingency, not a
+> step.**
+>
+> It applies only to a deployment still on the old
+> `feature/capella-7.0.1-support` branch, which is fully merged into `master`
+> and zero commits ahead of it. If you find one:
 >
 > ```bash
 > cd /opt/capella_tools && git checkout master && git pull   # FIRST
@@ -171,13 +184,37 @@ The app will now be reachable at `http://165.22.188.83/`.
 > ```
 >
 > Reverse that order and fabric generation is down between the two commands.
-> After this one-time catch-up the ordering stops mattering.
+
+> **Check it with a `fetch`, or the answer is meaningless.**
+>
+> ```bash
+> cd /opt/capella_tools
+> git fetch origin && git rev-list --count HEAD..origin/master   # 0 = current
+> ```
+>
+> Without the `fetch`, `rev-list` compares `HEAD` against a *local*
+> `origin/master` ref that may be months stale, and reports `0` for a clone that
+> is genuinely behind. That is not hypothetical: it is how the standalone box
+> reported "0 behind" on 2026-11-23 while sitting one commit short. **The tell:**
+> if `git log -1` prints `origin/master` on the same commit as `HEAD`, that clone
+> has not fetched and the count cannot be trusted.
+
+> **Do not run `pip install -r requirements.txt` for a routine app update.**
+> `capellambse>=0.6` is unpinned while `capellambse-context-diagrams==0.8.2` is
+> pinned, so a routine install can upgrade capellambse underneath a companion
+> pinned to a version it was never tested against — mid-window, and for no
+> benefit. The `PyYAML>=6` line in particular is documentation rather than a new
+> dependency: `capella_service.py` has imported `yaml` since `681bbad`, so it is
+> already installed everywhere this runs. Install deliberately, naming the
+> package, when a change actually needs one.
 
 ```bash
 cd /opt/capella_fabric_generator
 git pull
 # or, if local changes need discarding: git reset --hard origin/master && git pull
-.venv/bin/pip install -r requirements.txt   # pick up any new deps
+# No pip install by default -- see the note above. Only when a change actually
+# adds a dependency, and then name it rather than installing the whole file:
+#   .venv/bin/pip install <package>
 
 # Restart BOTH services. capella_service.py is shared by the website and the
 # MCP server, so restarting only capella-fabric leaves agents on the old code
