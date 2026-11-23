@@ -157,6 +157,22 @@ The app will now be reachable at `http://165.22.188.83/`.
 
 ## Updating the app (git pull workflow)
 
+> **Update `/opt/capella_tools` BEFORE pulling the app, once.** Since
+> obs-0013, `generate_fabric` parses its own output and **refuses** rather
+> than returning YAML-shaped text no parser accepts. That is the point of it,
+> and it means a `/opt/capella_tools` still on the old
+> `feature/capella-7.0.1-support` branch goes from silently returning a fabric
+> with no `is_actor` field to failing every fabric call outright. Correct, and
+> very visible. So on the first deploy after this change:
+>
+> ```bash
+> cd /opt/capella_tools && git checkout master && git pull   # FIRST
+> cd /opt/capella_fabric_generator && git pull               # then the app
+> ```
+>
+> Reverse that order and fabric generation is down between the two commands.
+> After this one-time catch-up the ordering stops mattering.
+
 ```bash
 cd /opt/capella_fabric_generator
 git pull

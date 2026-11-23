@@ -16,3 +16,11 @@ svgwrite>=1.4
 gunicorn>=21.0
 mcp[cli]>=1.0,<2   # 2.x renamed FastMCP to MCPServer; mcp_server.py imports FastMCP
 gitpython>=3.1
+# capella_service imports yaml directly -- for the declarative patch loader and,
+# since obs-0013, to parse every generated fabric before reporting success. It
+# arrives transitively through capellambse, and requirements.txt's own rule is
+# that an undeclared transitive import is the kind that disappears. Prefer a
+# wheel built with libyaml: CSafeLoader measured 11.2x faster than the pure
+# Python parser on a real 1.87 MB fabric, and the code falls back silently, so a
+# wheel without it makes the check slow rather than absent.
+PyYAML>=6

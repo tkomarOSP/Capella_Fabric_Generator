@@ -311,9 +311,15 @@ agent can be working in two different profiles.
    path to copy. Open it: a self-contained page, which you can confirm by
    disconnecting the network first. A generated view took 2.4 seconds and 84
    KB; an authored diagram 32 KB with `layout: stored`.
-6. Ask it for a fabric, then **parse the YAML it returns**. This is the one
-   check worth doing by hand, because a stale `Capella_Tools` produces 600 KB
-   of YAML-shaped text that no parser will accept, and nothing reports it.
+6. Ask it for a fabric. **The server now parses its own output** before
+   reporting success, so a stale `Capella_Tools` can no longer hand you 600 KB
+   of YAML-shaped text that no parser will accept -- `generate_fabric` refuses
+   instead, names the `capella_tools` file actually loaded, and says where it
+   wrote the output so you can look at the offending line. If you see that
+   message, the library is the first thing to check, not the model. Parsing it
+   yourself is no longer the check that matters; what is still worth one look
+   is that `is_actor` appears in the fabric, because a wrong library can drop a
+   field without producing anything a parser objects to.
 7. Ask it to write to a **read** model. It should refuse and say why.
 8. Ask it to patch and push a **write** model on a throwaway branch, then clone
    that branch yourself and open it in Capella. "The push succeeded" and "the

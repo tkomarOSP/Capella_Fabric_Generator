@@ -695,6 +695,48 @@ def resolve_uuids(model, uuid_list: list[str]) -> tuple[list[dict], list[str]]:
 # Fabric generation
 # ---------------------------------------------------------------------------
 
+# A fabric is YAML, and until obs-0013 nothing checked that it was. The failure
+# this guards is not a MISSING capella_tools -- that raises at import -- but a
+# WRONG one: a library 15 commits behind returned 607,758 characters of
+# plausible, unparseable text, carried no is_actor field at all, and the call
+# reported success. An agent then acts on fields that are not there. Parsing our
+# own output is the only check that holds however the library is configured --
+# and the only one that does not need to know which configuration is right.
+#
+# libyaml when the installed wheel carries it: measured 11.2x faster than the
+# pure-Python parser on a real 1.87 MB fabric (128 ms against 1,431 ms), which
+# is the difference between a check nobody notices and one somebody turns off.
+# Both loaders were checked to reject the same malformed shapes with the same
+# exception type and the same problem mark -- including the unquoted name
+# containing a colon that obs-0013 was actually about -- and to produce an equal
+# parse of the same 1.87 MB fabric. SafeLoader is the fallback rather than the
+# default because whether libyaml is in the wheel is a fact about the install,
+# not something to assume about a machine nobody has measured.
+_FABRIC_LOADER = getattr(yaml, 'CSafeLoader', yaml.SafeLoader)
+
+
+class FabricNotParseable(ValueError):
+    """generate_fabric produced text that is not YAML.
+
+    A ValueError subclass so the front ends' existing ``except Exception``
+    handlers report it as a readable sentence rather than letting it become a
+    transport error.
+    """
+
+
+def _library_file_in_use() -> str:
+    """Which ``capella_tools`` file is loaded -- not which directory was asked for.
+
+    ``sys.path.insert(0, ...)`` only wins if nothing imported the package
+    already, so a configured path cannot answer this and the module itself has
+    to be asked.
+    """
+    mod = sys.modules.get('capella_tools.capellambse_yaml_manager')
+    return getattr(mod, '__file__', '') or (
+        '(capella_tools not imported; CAPELLA_TOOLS_PATH='
+        + (os.environ.get('CAPELLA_TOOLS_PATH') or 'unset') + ')')
+
+
 def generate_fabric(session: dict) -> tuple[Path, int, int]:
     """
     Re-open the model and generate a YAML fabric for the resolved UUIDs.
@@ -766,10 +808,28 @@ def generate_fabric(session: dict) -> tuple[Path, int, int]:
     yaml_name = f'{archive_stem}_fabric.txt'
     yaml_path = _session_dir(session_id) / yaml_name
 
+    # Built once, so the bytes validated below are exactly the bytes a caller
+    # is handed -- the leading comment line included. Reading the file back to
+    # check it would be a second answer to the same question.
+    document = '# Capella Fabric YAML\n' + yaml_content + '\n'
     with open(yaml_path, 'w', encoding='utf-8') as f:
-        f.write('# Capella Fabric YAML\n')
-        f.write(yaml_content)
-        f.write('\n')
+        f.write(document)
+
+    # Validated AFTER the write, deliberately: whoever has to diagnose this
+    # needs the file in front of them, and the message names it.
+    try:
+        yaml.load(document, Loader=_FABRIC_LOADER)
+    except yaml.YAMLError as exc:
+        mark = getattr(exc, 'problem_mark', None)
+        where = (f' at line {mark.line + 1}, column {mark.column + 1}'
+                 if mark is not None else '')
+        problem = getattr(exc, 'problem', None) or str(exc).splitlines()[0]
+        raise FabricNotParseable(
+            f'The generated fabric is not parseable YAML: {problem}{where}. '
+            f'That is usually the capella_tools library being the wrong version '
+            f'rather than the model being unusual -- the copy in use is '
+            f'{_library_file_in_use()}. The output was still written to '
+            f'{yaml_path}, so it can be inspected.') from exc
 
     return yaml_path, object_count, artifact_count
 
